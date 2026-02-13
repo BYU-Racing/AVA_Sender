@@ -1,10 +1,22 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXNetSystem.h>
 
+#include <linux/can.h>
+#include <linux/can/raw.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <iostream>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <queue>
+#include <thread>
 
 /*
 {
@@ -16,33 +28,64 @@
 */
 struct pi_to_server {
     uint32_t timestamp;
-    uint8_t id;
+    uint8_t id; //TODO: id could be bigger
     uint8_t length;
     uint8_t bytes[8];
 } __attribute__((packed));
 
-static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes");
 
-ix::WebSocket webSocket;
 std::string url = "ws://ava-02.us-east-2.elasticbeanstalk.com/api/ws/send";
 
-void setupWebSocket() {
+static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes");
+
+
+static uint32_t getTimeNow() {
+    using namespace std::chrono;
+    return static_cast<uint32_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+static int openCANSocket(const char* ifname){
+    int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+    if(s < 0){
+        perror("Problem opening CAN socket");
+        return -1;
+    }
+
+    struct ifreq ifr {};
+    std::strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
+    if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) { perror("ioctl(SIOCGIFINDEX)"); close(s); return -1; }
+
+    struct sockaddr_can addr {};
+    addr.can_family = AF_CAN;
+    addr.can_ifindex = ifr.ifr_ifindex;
+
+    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) { 
+        perror("bind(can)"); close(s); 
+        return -1; 
+    }
+}
+
+void setupWebSocket(ix::WebSocket& webSocket, std::atomic<bool>& ws_open) {
     ix::initNetSystem();
 
     webSocket.setUrl(url);
 
     webSocket.disableAutomaticReconnection(); // start simple
+    
 
     webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr& msg) {
         using Type = ix::WebSocketMessageType;
 
         if (msg->type == Type::Open) {
+            ws_open = true;
             std::cout << "Connected" << "\n";
         } else if (msg->type == Type::Message) {
             std::cout << "Received text msg: " << msg->str << "\n";
         } else if (msg->type == Type::Close) {
+            ws_open = false;
             std::cout << "Closed\n";
         } else if (msg->type == Type::Error) {
+            ws_open = false;
             std::cerr << "Error: " << msg->errorInfo.reason << "\n";
         }
     });
@@ -55,60 +98,128 @@ void fill(pi_to_server* pkt, uint32_t timestamp, uint8_t id, uint8_t length) { /
 }
 
 int main() {
-    setupWebSocket();
-    
-    pi_to_server thr1_pkt{};
-    fill(&thr1_pkt, 123456, 1, 8);
-    thr1_pkt.bytes[0] = static_cast<uint8_t>(42);
-    std::string thr1_payload(sizeof(thr1_pkt), '\0');
+    ix::WebSocket webSocket;
+    std::atomic<bool> ws_open{false};
+    setupWebSocket(webSocket, ws_open);
 
-    pi_to_server brk_pkt{};
-    fill(&brk_pkt, 123456, 3, 8);
-    brk_pkt.bytes[0] = static_cast<uint8_t>(30);
-    std::string brk_payload(sizeof(brk_pkt), '\0');
+    // CAN queue
+    std::mutex m;
+    std::queue<pi_to_server> q;
+    std::atomic<bool> running{true}; // Atomic so that all threads can read it safely
 
-    pi_to_server rpm_pkt{};
-    fill(&rpm_pkt, 123456, 5, 8);
-    rpm_pkt.bytes[0] = static_cast<uint8_t>(0xE8);
-    rpm_pkt.bytes[1] = static_cast<uint8_t>(0x3);
-    std::string rpm_payload(sizeof(rpm_pkt), '\0');
+    // pi_to_server thr1_pkt{};
+    // fill(&thr1_pkt, 123456, 1, 8);
+    // thr1_pkt.bytes[0] = static_cast<uint8_t>(42);
+    // std::string thr1_payload(sizeof(thr1_pkt), '\0');
+
+    // pi_to_server brk_pkt{};
+    // fill(&brk_pkt, 123456, 3, 8);
+    // brk_pkt.bytes[0] = static_cast<uint8_t>(30);
+    // std::string brk_payload(sizeof(brk_pkt), '\0');
+
+    // pi_to_server rpm_pkt{};
+    // fill(&rpm_pkt, 123456, 5, 8);
+    // rpm_pkt.bytes[0] = static_cast<uint8_t>(0xE8);
+    // rpm_pkt.bytes[1] = static_cast<uint8_t>(0x3);
+    // std::string rpm_payload(sizeof(rpm_pkt), '\0');
     
 
     webSocket.start();
 
+    int can_fd = openCANSocket("can0");
+    if(can_fd < 0) {
+        std::cerr << "Failed to open CAN socket\n";
+        return 1;
+    }
+
+    // CAN reader thread
+    std::thread can_thread([&](){
+        while (running) {
+            struct can_frame frame {};
+            int n = read(can_fd, &frame, sizeof(frame));
+            if (n < 0) {
+                perror("read(can)");
+                continue;
+            }
+            if (n != (int)sizeof(frame)) continue;
+
+            pi_to_server pkt {};
+            pkt.timestamp = getTimeNow();
+
+            // Extract ID (strip flags)
+            uint32_t can_id = frame.can_id;
+            uint8_t id = (can_id & CAN_EFF_FLAG) ? (can_id & CAN_EFF_MASK) : (can_id & CAN_SFF_MASK);
+            pkt.id = id;
+
+            pkt.length = frame.can_dlc;
+            if (pkt.length > 8) pkt.length = 8;
+            std::memcpy(pkt.bytes, frame.data, pkt.length);
+
+            {
+                std::lock_guard<std::mutex> lk(m);
+                q.push(pkt);
+            }
+        }
+    });
+
+
     while(webSocket.getReadyState() != ix::ReadyState::Open) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    
 
-    std::cout << "Press Ctrl+C to quit\n";
+    std::cout << "Sending data...\nPress Ctrl+C to quit\n";
     while (true) { 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+        if(!ws_open){
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        pi_to_server pkt {};
+        bool unlocked = false;
+        {
+            std::lock_guard<std::mutex> lock(m);
+            if (!q.empty()){
+                pkt = q.front();
+                q.pop();
+                unlocked = true;
+            }
+        }
+        if(!unlocked){ // if queue not ready, wait 100ms and try again
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+
+        std::string payload(sizeof(pkt), '\0');
+        std::memcpy(payload.data(), &pkt, sizeof(pkt));
+        webSocket.sendBinary(payload);
+
+        // std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
 
         // Flip-flop between 42 and 43 for throttle 1
-        thr1_pkt.bytes[0] = thr1_pkt.bytes[0] == 42 ? static_cast<uint8_t>(43) : static_cast<uint8_t>(42);
+        // thr1_pkt.bytes[0] = thr1_pkt.bytes[0] == 42 ? static_cast<uint8_t>(43) : static_cast<uint8_t>(42);
 
         // Flip-flop between 30 and 35 for brake
-        brk_pkt.bytes[0] = brk_pkt.bytes[0] == 30 ? static_cast<uint8_t>(35) : static_cast<uint8_t>(30);
+        // brk_pkt.bytes[0] = brk_pkt.bytes[0] == 30 ? static_cast<uint8_t>(35) : static_cast<uint8_t>(30);
 
         // Increases rpm by 1
-        if(rpm_pkt.bytes[0] == 255) {
-            rpm_pkt.bytes[0] = 0;
-            rpm_pkt.bytes[1] += 1;
-        }
-        rpm_pkt.bytes[0] += 1;
+        // if(rpm_pkt.bytes[0] == 255) {
+        //     rpm_pkt.bytes[0] = 0;
+        //     rpm_pkt.bytes[1] += 1;
+        // }
+        // rpm_pkt.bytes[0] += 1;
 
-        std::memcpy(thr1_payload.data(), &thr1_pkt, sizeof(thr1_pkt));
-        std::memcpy(brk_payload.data(), &brk_pkt, sizeof(brk_pkt));
-        std::memcpy(rpm_payload.data(), &rpm_pkt, sizeof(rpm_pkt));
-        webSocket.sendBinary(thr1_payload);
-        webSocket.sendBinary(brk_payload);
-        webSocket.sendBinary(rpm_payload);
+        // std::memcpy(thr1_payload.data(), &thr1_pkt, sizeof(thr1_pkt));
+        // std::memcpy(brk_payload.data(), &brk_pkt, sizeof(brk_pkt));
+        // std::memcpy(rpm_payload.data(), &rpm_pkt, sizeof(rpm_pkt));
+        // webSocket.sendBinary(thr1_payload);
+        // webSocket.sendBinary(brk_payload);
+        // webSocket.sendBinary(rpm_payload);
     }
     
-
+    running = false;
+    can_thread.join();
+    close(can_fd);
     webSocket.stop();
-
     ix::uninitNetSystem();
 
     return 0;
