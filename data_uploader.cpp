@@ -63,6 +63,7 @@ static int openCANSocket(const char* ifname){
         perror("bind(can)"); close(s); 
         return -1; 
     }
+    return s;
 }
 
 void setupWebSocket(ix::WebSocket& webSocket, std::atomic<bool>& ws_open) {
@@ -106,22 +107,6 @@ int main() {
     std::mutex m;
     std::queue<pi_to_server> q;
     std::atomic<bool> running{true}; // Atomic so that all threads can read it safely
-
-    // pi_to_server thr1_pkt{};
-    // fill(&thr1_pkt, 123456, 1, 8);
-    // thr1_pkt.bytes[0] = static_cast<uint8_t>(42);
-    // std::string thr1_payload(sizeof(thr1_pkt), '\0');
-
-    // pi_to_server brk_pkt{};
-    // fill(&brk_pkt, 123456, 3, 8);
-    // brk_pkt.bytes[0] = static_cast<uint8_t>(30);
-    // std::string brk_payload(sizeof(brk_pkt), '\0');
-
-    // pi_to_server rpm_pkt{};
-    // fill(&rpm_pkt, 123456, 5, 8);
-    // rpm_pkt.bytes[0] = static_cast<uint8_t>(0xE8);
-    // rpm_pkt.bytes[1] = static_cast<uint8_t>(0x3);
-    // std::string rpm_payload(sizeof(rpm_pkt), '\0');
     
 
     webSocket.start();
@@ -192,28 +177,6 @@ int main() {
         std::string payload(sizeof(pkt), '\0');
         std::memcpy(payload.data(), &pkt, sizeof(pkt));
         webSocket.sendBinary(payload);
-
-        // std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
-
-        // Flip-flop between 42 and 43 for throttle 1
-        // thr1_pkt.bytes[0] = thr1_pkt.bytes[0] == 42 ? static_cast<uint8_t>(43) : static_cast<uint8_t>(42);
-
-        // Flip-flop between 30 and 35 for brake
-        // brk_pkt.bytes[0] = brk_pkt.bytes[0] == 30 ? static_cast<uint8_t>(35) : static_cast<uint8_t>(30);
-
-        // Increases rpm by 1
-        // if(rpm_pkt.bytes[0] == 255) {
-        //     rpm_pkt.bytes[0] = 0;
-        //     rpm_pkt.bytes[1] += 1;
-        // }
-        // rpm_pkt.bytes[0] += 1;
-
-        // std::memcpy(thr1_payload.data(), &thr1_pkt, sizeof(thr1_pkt));
-        // std::memcpy(brk_payload.data(), &brk_pkt, sizeof(brk_pkt));
-        // std::memcpy(rpm_payload.data(), &rpm_pkt, sizeof(rpm_pkt));
-        // webSocket.sendBinary(thr1_payload);
-        // webSocket.sendBinary(brk_payload);
-        // webSocket.sendBinary(rpm_payload);
     }
     
     running = false;
