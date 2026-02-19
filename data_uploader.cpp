@@ -34,7 +34,7 @@ struct pi_to_server {
 } __attribute__((packed));
 
 
-std::string url = "ws://ava-02.us-east-2.elasticbeanstalk.com/api/ws/send";
+std::string url = "ws://13.58.232.73:8000/api/ws/send";
 
 static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes");
 
