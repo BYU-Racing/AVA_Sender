@@ -35,15 +35,23 @@ def make_packet(msg_id=0) -> bytes:
                 data[i] = random.randint(0, 255)
         case 6:
             data[0] = random.randint(0, 3)
-            for i in range(1, 6):
-                data[i] = random.randint(0, 255)
-        case 7: 
+            temp_in = random.randint(20, 100)
+            temp_out = random.randint(20, 100)
+            temp_core = random.randint(20, 100)
+            data[:] = [0 for n in data]
+            data[1] = temp_in
+            data[3] = temp_out
+            data[5] = temp_core
+        case 7:
             data[0] = random.randint(0, 100)
         case 8:
             data[0] = random.randint(0, 150)
         case 9: # GPS
-            for i in range(0, 7):
-                data[i] = random.randint(0, 255)
+            lat_e7 = int((42 + random.uniform(-0.05, 0.05)) * 1e7)
+            lon_e7 = int((-105 + random.uniform(-0.05, 0.05)) * 1e7)
+
+            data[0:4] = lat_e7.to_bytes(4, "little", signed=True)
+            data[4:8] = lon_e7.to_bytes(4, "little", signed=True)
         case 10:
             data[0] = random.randint(0, 4)
 
