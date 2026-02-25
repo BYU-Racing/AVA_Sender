@@ -17,6 +17,15 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <iomanip>
+#include <sstream>
+
+// ===== DEBUG SETTINGS =====
+// Uncomment to enable CAN RX prints
+#define DEBUG_CAN_RX
+
+// Optional: print at most N lines per second (keeps it from spamming / slowing)
+#define DEBUG_CAN_RX_RATE_LIMIT_HZ 10   // e.g., 50 prints/sec
 
 /*
 {
@@ -33,6 +42,92 @@ struct pi_to_server {
     uint8_t bytes[8];
 } __attribute__((packed));
 
+#ifdef DEBUG_CAN_RX // AI
+namespace dbg_can {
+
+// Basic ANSI colors (works in most terminals; if you hate color, set empty strings)
+static constexpr const char* CLR_RESET  = "\033[0m";
+static constexpr const char* CLR_DIM    = "\033[2m";
+static constexpr const char* CLR_STD    = "\033[36m";  // cyan
+static constexpr const char* CLR_EXT    = "\033[35m";  // magenta
+static constexpr const char* CLR_ERR    = "\033[31m";  // red
+static constexpr const char* CLR_RTR    = "\033[33m";  // yellow
+
+// Monotonic timestamp in ms (relative to start)
+static inline uint64_t now_ms()
+{
+    using namespace std::chrono;
+    return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+#if defined(DEBUG_CAN_RX_RATE_LIMIT_HZ) && (DEBUG_CAN_RX_RATE_LIMIT_HZ > 0)
+static inline bool allow_print()
+{
+    // Token bucket-ish: allow up to HZ prints per second
+    static uint64_t window_start_ms = now_ms();
+    static uint32_t count_in_window = 0;
+
+    uint64_t t = now_ms();
+    if (t - window_start_ms >= 1000) {
+        window_start_ms = t;
+        count_in_window = 0;
+    }
+    if (count_in_window >= (uint32_t)DEBUG_CAN_RX_RATE_LIMIT_HZ) return false;
+    ++count_in_window;
+    return true;
+}
+#else
+static inline bool allow_print() { return true; }
+#endif
+
+static inline void print_frame(const struct can_frame& frame, uint32_t raw_id)
+{
+    if (!allow_print()) return;
+
+    const bool is_ext = (frame.can_id & CAN_EFF_FLAG) != 0;
+    const bool is_rtr = (frame.can_id & CAN_RTR_FLAG) != 0;
+    const uint8_t dlc = frame.can_dlc > 8 ? 8 : frame.can_dlc;
+
+    // Build message in a stringstream (single iostream write reduces interleaving/overhead)
+    std::ostringstream oss;
+
+    // timestamp
+    oss << CLR_DIM << "[" << now_ms() << " ms] " << CLR_RESET;
+
+    // type + id
+    oss << (is_ext ? CLR_EXT : CLR_STD)
+        << (is_ext ? "EXT " : "STD ")
+        << CLR_RESET;
+
+    // raw ID in hex (width depends on standard/extended)
+    oss << "ID=0x"
+        << std::hex << std::uppercase << std::setfill('0')
+        << std::setw(is_ext ? 8 : 3) << raw_id
+        << std::dec << std::nouppercase;
+
+    // DLC
+    oss << " DLC=" << (int)dlc << " DATA=";
+
+    if (is_rtr) {
+        oss << CLR_RTR << "(RTR)" << CLR_RESET;
+    } else {
+        // bytes
+        oss << std::hex << std::uppercase << std::setfill('0');
+        for (int i = 0; i < dlc; ++i) {
+            oss << std::setw(2) << (int)frame.data[i];
+            if (i != dlc - 1) oss << ' ';
+        }
+        oss << std::dec << std::nouppercase;
+    }
+
+    oss << "\n";
+
+    // One output call
+    std::cout << oss.str();
+}
+
+} // namespace dbg_can
+#endif
 
 std::string url = "ws://13.58.232.73:8000/api/ws/send";
 
@@ -131,10 +226,31 @@ int main() {
             pi_to_server pkt {};
             pkt.timestamp = getTimeNow();
 
-            // Extract ID (strip flags)
-            uint32_t can_id = frame.can_id;
-            uint8_t id = (can_id & CAN_EFF_FLAG) ? (can_id & CAN_EFF_MASK) : (can_id & CAN_SFF_MASK);
-            pkt.id = id;
+            // Ignore error frames
+            if (frame.can_id & CAN_ERR_FLAG) {
+                continue;
+            }
+
+            // Extract raw CAN identifier (strip flags)
+            uint32_t raw_id = 0;
+            if (frame.can_id & CAN_EFF_FLAG) {
+                raw_id = (frame.can_id & CAN_EFF_MASK);   // 29-bit extended
+            } else {
+                raw_id = (frame.can_id & CAN_SFF_MASK);   // 11-bit standard
+            }
+
+            #ifdef DEBUG_CAN_RX
+            dbg_can::print_frame(frame, raw_id);
+            #endif
+
+            // Shorten to 8-bit upload ID (XOR-fold spreads better than raw_id & 0xFF)
+            uint8_t short_id = static_cast<uint8_t>(
+                (raw_id) ^
+                (raw_id >> 8) ^
+                (raw_id >> 16) ^
+                (raw_id >> 24)
+            );
+            pkt.id = short_id;
 
             pkt.length = frame.can_dlc;
             if (pkt.length > 8) pkt.length = 8;
