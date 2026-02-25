@@ -129,6 +129,8 @@ static inline void print_frame(const struct can_frame& frame, uint32_t raw_id)
 } // namespace dbg_can
 #endif
 
+
+
 std::string url = "ws://13.58.232.73:8000/api/ws/send";
 
 static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes");
