@@ -186,13 +186,13 @@ void setupWebSocket(
         } else if (msg->type == Type::Close) {
             ws_open = false;
             if(was_connected && reconnect_deadline == 0){
-                reconnect_deadline = getTimeNow32() + RECONNECT_DELAY_MS;
+                reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
             }
             std::cout << "Close signal received\n";
         } else if (msg->type == Type::Error) {
             ws_open = false;
             if(was_connected && reconnect_deadline == 0){
-                reconnect_deadline = getTimeNow32() + RECONNECT_DELAY_MS;
+                reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
             }
             std::cerr << "WS Error: " << msg->errorInfo.reason << "\n";
         }
