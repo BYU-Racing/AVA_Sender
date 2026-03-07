@@ -173,8 +173,6 @@ void setupWebSocket(
 
     webSocket.setUrl(url);
 
-    webSocket.enableAutomaticReconnection();
-
     webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr& msg) {
         using Type = ix::WebSocketMessageType;
 
@@ -281,6 +279,7 @@ int main() {
                reconnect_deadline != 0 && 
                getTimeNow64() >= reconnect_deadline) {
                 std::cout << "Websocket closed.\n";
+                webSocket.disableAutomaticReconnection();
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
