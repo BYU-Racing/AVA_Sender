@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-git pull --rebase
+git pull
 
 BUILD_DIR="${BUILD_DIR:-build}"
 JOBS="${JOBS:-$(nproc)}"
