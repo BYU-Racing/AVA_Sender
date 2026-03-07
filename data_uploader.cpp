@@ -37,10 +37,22 @@
 */
 struct pi_to_server {
     uint32_t timestamp;
-    uint8_t id; //TODO: id could be bigger
+    uint32_t id;
     uint8_t length;
     uint8_t bytes[8];
 } __attribute__((packed));
+
+// Monotonic timestamp in ms (relative to start)
+static inline uint64_t getTimeNow64()
+{
+    using namespace std::chrono;
+    return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+static uint32_t getTimeNow32() {
+    using namespace std::chrono;
+    return static_cast<uint32_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
 
 #ifdef DEBUG_CAN_RX // AI
 namespace dbg_can {
@@ -53,21 +65,15 @@ static constexpr const char* CLR_EXT    = "\033[35m";  // magenta
 static constexpr const char* CLR_ERR    = "\033[31m";  // red
 static constexpr const char* CLR_RTR    = "\033[33m";  // yellow
 
-// Monotonic timestamp in ms (relative to start)
-static inline uint64_t now_ms()
-{
-    using namespace std::chrono;
-    return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-}
 
 #if defined(DEBUG_CAN_RX_RATE_LIMIT_HZ) && (DEBUG_CAN_RX_RATE_LIMIT_HZ > 0)
 static inline bool allow_print()
 {
     // Token bucket-ish: allow up to HZ prints per second
-    static uint64_t window_start_ms = now_ms();
+    static uint64_t window_start_ms = getTimeNow64();
     static uint32_t count_in_window = 0;
 
-    uint64_t t = now_ms();
+    uint64_t t = getTimeNow64();
     if (t - window_start_ms >= 1000) {
         window_start_ms = t;
         count_in_window = 0;
@@ -92,7 +98,7 @@ static inline void print_frame(const struct can_frame& frame, uint32_t raw_id)
     std::ostringstream oss;
 
     // timestamp
-    oss << CLR_DIM << "[" << now_ms() << " ms] " << CLR_RESET;
+    oss << CLR_DIM << "[" << getTimeNow64() << " ms] " << CLR_RESET;
 
     // type + id
     oss << (is_ext ? CLR_EXT : CLR_STD)
@@ -130,16 +136,10 @@ static inline void print_frame(const struct can_frame& frame, uint32_t raw_id)
 #endif
 
 
-
 std::string url = "ws://13.58.232.73:8000/api/ws/send";
+const uint64_t RECONNECT_DELAY_MS = 5000; // 5 seconds
 
-static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes");
-
-
-static uint32_t getTimeNow() {
-    using namespace std::chrono;
-    return static_cast<uint32_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
+static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
 
 static int openCANSocket(const char* ifname){
     int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
@@ -163,42 +163,51 @@ static int openCANSocket(const char* ifname){
     return s;
 }
 
-void setupWebSocket(ix::WebSocket& webSocket, std::atomic<bool>& ws_open) {
+// Sets up websocket with URL and sets up message callback function
+void setupWebSocket(
+    ix::WebSocket& webSocket, std::atomic<bool>& ws_open, 
+    std::atomic<bool>& was_connected, std::atomic<uint64_t>& reconnect_deadline
+    ) {
+
     ix::initNetSystem();
 
     webSocket.setUrl(url);
 
-    webSocket.disableAutomaticReconnection(); // start simple
-    
+    webSocket.enableAutomaticReconnection();
 
     webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr& msg) {
         using Type = ix::WebSocketMessageType;
 
         if (msg->type == Type::Open) {
             ws_open = true;
-            std::cout << "Connected" << "\n";
+            was_connected = true;
+            reconnect_deadline = 0;
+            std::cout << "Connected to WS" << "\n";
         } else if (msg->type == Type::Message) {
             std::cout << "Received text msg: " << msg->str << "\n";
         } else if (msg->type == Type::Close) {
             ws_open = false;
-            std::cout << "Closed\n";
+            if(was_connected && reconnect_deadline == 0){
+                reconnect_deadline = getTimeNow32() + RECONNECT_DELAY_MS;
+            }
+            std::cout << "Close signal received\n";
         } else if (msg->type == Type::Error) {
             ws_open = false;
-            std::cerr << "Error: " << msg->errorInfo.reason << "\n";
+            if(was_connected && reconnect_deadline == 0){
+                reconnect_deadline = getTimeNow32() + RECONNECT_DELAY_MS;
+            }
+            std::cerr << "WS Error: " << msg->errorInfo.reason << "\n";
         }
     });
 }
 
-void fill(pi_to_server* pkt, uint32_t timestamp, uint8_t id, uint8_t length) { // Fill packets
-    pkt->timestamp = timestamp;
-    pkt->id = id;
-    pkt->length = length;
-}
 
 int main() {
     ix::WebSocket webSocket;
     std::atomic<bool> ws_open{false};
-    setupWebSocket(webSocket, ws_open);
+    std::atomic<bool> was_connected{false};
+    std::atomic<uint64_t> reconnect_deadline{0};
+    setupWebSocket(webSocket, ws_open, was_connected, reconnect_deadline);
 
     // CAN queue
     std::mutex m;
@@ -226,7 +235,7 @@ int main() {
             if (n != (int)sizeof(frame)) continue;
 
             pi_to_server pkt {};
-            pkt.timestamp = getTimeNow();
+            pkt.timestamp = getTimeNow32();
 
             // Ignore error frames
             if (frame.can_id & CAN_ERR_FLAG) {
@@ -245,14 +254,7 @@ int main() {
             dbg_can::print_frame(frame, raw_id);
             #endif
 
-            // Shorten to 8-bit upload ID (XOR-fold spreads better than raw_id & 0xFF)
-            uint8_t short_id = static_cast<uint8_t>(
-                (raw_id) ^
-                (raw_id >> 8) ^
-                (raw_id >> 16) ^
-                (raw_id >> 24)
-            );
-            pkt.id = short_id;
+            pkt.id = raw_id;
 
             pkt.length = frame.can_dlc;
             if (pkt.length > 8) pkt.length = 8;
@@ -270,9 +272,17 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    // Sender loop
     std::cout << "Sending data...\nPress Ctrl+C to quit\n";
     while (true) { 
         if(!ws_open){
+            // check if reconnect deadline has passed
+            if(was_connected && 
+               reconnect_deadline != 0 && 
+               getTimeNow64() >= reconnect_deadline) {
+                std::cout << "Websocket closed.\n";
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
@@ -298,8 +308,8 @@ int main() {
     }
     
     running = false;
-    can_thread.join();
     close(can_fd);
+    can_thread.join();
     webSocket.stop();
     ix::uninitNetSystem();
 

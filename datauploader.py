@@ -68,7 +68,7 @@ async def main():
         while True:
             pkt = make_packet(msg_id)
             await ws.send(pkt)  # sends as binary frame
-            await asyncio.sleep(0.05)  # 20 Hz. change as needed
+            await asyncio.sleep(0.01)  # in ms
             msg_id = msg_id + 1 if msg_id < 10 else 0
 
 if __name__ == "__main__":
