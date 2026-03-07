@@ -284,8 +284,10 @@ int main() {
                 break;
             }
             // Try to restart websocket if it's not open
-            webSocket.stop();
-            webSocket.start(); 
+            if(was_connected) {
+                webSocket.stop();
+                webSocket.start(); 
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
