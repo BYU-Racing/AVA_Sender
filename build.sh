@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+git pull --rebase
+
 BUILD_DIR="${BUILD_DIR:-build}"
 JOBS="${JOBS:-$(nproc)}"
 
@@ -20,6 +22,7 @@ for arg in "$@"; do
   esac
 done
 
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
 if [[ ! -f "$BUILD_DIR/CMakeCache.txt" || "$RECONFIGURE" -eq 1 ]]; then
