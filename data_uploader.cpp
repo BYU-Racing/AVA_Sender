@@ -201,6 +201,49 @@ void setupWebSocket(
     });
 }
 
+void readCAN(int can_fd, std::mutex& m, std::queue<pi_to_server>& q, std::atomic<bool>& running){
+    while (running) {
+        struct can_frame frame {};
+        int n = read(can_fd, &frame, sizeof(frame));
+        if (n < 0) {
+            perror("read(can)");
+            continue;
+        }
+        if (n != (int)sizeof(frame)) continue;
+
+        pi_to_server pkt {};
+        pkt.timestamp = getTimeNow32();
+
+        // Ignore error frames
+        if (frame.can_id & CAN_ERR_FLAG) {
+            continue;
+        }
+
+        // Extract raw CAN identifier (strip flags)
+        uint32_t raw_id = 0;
+        if (frame.can_id & CAN_EFF_FLAG) {
+            raw_id = (frame.can_id & CAN_EFF_MASK);   // 29-bit extended
+        } else {
+            raw_id = (frame.can_id & CAN_SFF_MASK);   // 11-bit standard
+        }
+
+        #ifdef DEBUG_CAN_RX
+        dbg_can::print_frame(frame, raw_id);
+        #endif
+
+        pkt.id = raw_id;
+
+        pkt.length = frame.can_dlc;
+        if (pkt.length > 8) pkt.length = 8;
+        std::memcpy(pkt.bytes, frame.data, pkt.length);
+
+        {
+            std::lock_guard<std::mutex> lk(m);
+            q.push(pkt);
+        }
+    }
+}
+
 
 int main() {
     ix::WebSocket webSocket;
@@ -217,56 +260,26 @@ int main() {
 
     webSocket.start();
 
-    int can_fd = openCANSocket("can0");
-    if(can_fd < 0) {
-        std::cerr << "Failed to open CAN socket\n";
+    int can0_fd = openCANSocket("can0");
+    if(can0_fd < 0) {
+        std::cerr << "Failed to open CAN0 socket\n";
         return 1;
     }
 
-    // CAN reader thread
+    // int can1_fd = openCANSocket("can1");
+    // if(can1_fd < 0) {
+    //     std::cerr << "Failed to open CAN1 socket\n";
+    //     return 1;
+    // }
+
+    // CAN0 reader thread
     std::thread can_thread([&](){
-        while (running) {
-            struct can_frame frame {};
-            int n = read(can_fd, &frame, sizeof(frame));
-            if (n < 0) {
-                perror("read(can)");
-                continue;
-            }
-            if (n != (int)sizeof(frame)) continue;
-
-            pi_to_server pkt {};
-            pkt.timestamp = getTimeNow32();
-
-            // Ignore error frames
-            if (frame.can_id & CAN_ERR_FLAG) {
-                continue;
-            }
-
-            // Extract raw CAN identifier (strip flags)
-            uint32_t raw_id = 0;
-            if (frame.can_id & CAN_EFF_FLAG) {
-                raw_id = (frame.can_id & CAN_EFF_MASK);   // 29-bit extended
-            } else {
-                raw_id = (frame.can_id & CAN_SFF_MASK);   // 11-bit standard
-            }
-
-            #ifdef DEBUG_CAN_RX
-            dbg_can::print_frame(frame, raw_id);
-            #endif
-
-            pkt.id = raw_id;
-
-            pkt.length = frame.can_dlc;
-            if (pkt.length > 8) pkt.length = 8;
-            std::memcpy(pkt.bytes, frame.data, pkt.length);
-
-            {
-                std::lock_guard<std::mutex> lk(m);
-                q.push(pkt);
-            }
-        }
+        readCAN(can0_fd, m, q, running);
     });
 
+    // std::thread can1_thread([&](){
+    //     readCAN(can1_fd, m, q, running);
+    // })
 
     while(webSocket.getReadyState() != ix::ReadyState::Open) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
