@@ -4,7 +4,7 @@ import struct
 import time
 import websockets
 
-WS_URL = "ws://13.58.232.73:8000/api/ws/send"
+WS_URL = "ws://100.85.246.127:8000/api/ws/send"
 
 # struct pi_to_server:
 # uint32_t timestamp; uint8_t id; uint8_t length; uint8_t bytes[8];
