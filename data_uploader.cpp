@@ -326,7 +326,8 @@ int main() {
     }
     
     running = false;
-    close(can_fd);
+    close(can0_fd);
+    // close(can1_fd);
     can_thread.join();
     webSocket.stop();
     ix::uninitNetSystem();
