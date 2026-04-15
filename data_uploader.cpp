@@ -20,13 +20,6 @@
 #include <iomanip>
 #include <sstream>
 
-// ===== DEBUG SETTINGS =====
-// Uncomment to enable CAN RX prints
-#define DEBUG_CAN_RX
-
-// Optional: print at most N lines per second (keeps it from spamming / slowing)
-#define DEBUG_CAN_RX_RATE_LIMIT_HZ 10   // e.g., 50 prints/sec
-
 /*
 {
     timestamp: int,
@@ -54,88 +47,8 @@ static uint32_t getTimeNow32() {
     return static_cast<uint32_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
 }
 
-#ifdef DEBUG_CAN_RX // AI
-namespace dbg_can {
 
-// Basic ANSI colors (works in most terminals; if you hate color, set empty strings)
-static constexpr const char* CLR_RESET  = "\033[0m";
-static constexpr const char* CLR_DIM    = "\033[2m";
-static constexpr const char* CLR_STD    = "\033[36m";  // cyan
-static constexpr const char* CLR_EXT    = "\033[35m";  // magenta
-static constexpr const char* CLR_ERR    = "\033[31m";  // red
-static constexpr const char* CLR_RTR    = "\033[33m";  // yellow
-
-
-#if defined(DEBUG_CAN_RX_RATE_LIMIT_HZ) && (DEBUG_CAN_RX_RATE_LIMIT_HZ > 0)
-static inline bool allow_print()
-{
-    // Token bucket-ish: allow up to HZ prints per second
-    static uint64_t window_start_ms = getTimeNow64();
-    static uint32_t count_in_window = 0;
-
-    uint64_t t = getTimeNow64();
-    if (t - window_start_ms >= 1000) {
-        window_start_ms = t;
-        count_in_window = 0;
-    }
-    if (count_in_window >= (uint32_t)DEBUG_CAN_RX_RATE_LIMIT_HZ) return false;
-    ++count_in_window;
-    return true;
-}
-#else
-static inline bool allow_print() { return true; }
-#endif
-
-static inline void print_frame(const struct can_frame& frame, uint32_t raw_id)
-{
-    if (!allow_print()) return;
-
-    const bool is_ext = (frame.can_id & CAN_EFF_FLAG) != 0;
-    const bool is_rtr = (frame.can_id & CAN_RTR_FLAG) != 0;
-    const uint8_t dlc = frame.can_dlc > 8 ? 8 : frame.can_dlc;
-
-    // Build message in a stringstream (single iostream write reduces interleaving/overhead)
-    std::ostringstream oss;
-
-    // timestamp
-    oss << CLR_DIM << "[" << getTimeNow64() << " ms] " << CLR_RESET;
-
-    // type + id
-    oss << (is_ext ? CLR_EXT : CLR_STD)
-        << (is_ext ? "EXT " : "STD ")
-        << CLR_RESET;
-
-    // raw ID in hex (width depends on standard/extended)
-    oss << "ID=0x"
-        << std::hex << std::uppercase << std::setfill('0')
-        << std::setw(is_ext ? 8 : 3) << raw_id
-        << std::dec << std::nouppercase;
-
-    // DLC
-    oss << " DLC=" << (int)dlc << " DATA=";
-
-    if (is_rtr) {
-        oss << CLR_RTR << "(RTR)" << CLR_RESET;
-    } else {
-        // bytes
-        oss << std::hex << std::uppercase << std::setfill('0');
-        for (int i = 0; i < dlc; ++i) {
-            oss << std::setw(2) << (int)frame.data[i];
-            if (i != dlc - 1) oss << ' ';
-        }
-        oss << std::dec << std::nouppercase;
-    }
-
-    oss << "\n";
-
-    // One output call
-    std::cout << oss.str();
-}
-
-} // namespace dbg_can
-#endif
-
-
+// ===== Main code =====
 std::string url = "ws://100.85.246.127:8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 5000; // 5 seconds
 
