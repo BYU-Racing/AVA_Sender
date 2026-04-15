@@ -50,7 +50,8 @@ static uint32_t getTimeNow32() {
 
 // ===== Main code =====
 std::string url = "ws://100.85.246.127:8000/api/ws/send";
-const uint64_t RECONNECT_DELAY_MS = 5000; // 5 seconds
+const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds
+const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second
 
 static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes"); // Constantly checks that packet is the right size
 
@@ -79,7 +80,8 @@ static int openCANSocket(const char* ifname){
 // Sets up websocket with URL and sets up message callback function
 void setupWebSocket(
     ix::WebSocket& webSocket, std::atomic<bool>& ws_open, 
-    std::atomic<bool>& was_connected, std::atomic<uint64_t>& reconnect_deadline
+    std::atomic<bool>& was_connected, std::atomic<uint64_t>& reconnect_deadline,
+    std::atomic<uint64_t>& next_reconnect_attempt
     ) {
 
     ix::initNetSystem();
@@ -95,6 +97,7 @@ void setupWebSocket(
             ws_open = true;
             was_connected = true;
             reconnect_deadline = 0;
+            next_reconnect_attempt = 0;
             std::cout << "Connected to WS" << "\n";
         } else if (msg->type == Type::Message) {
             std::cout << "Received text msg: " << msg->str << "\n";
@@ -102,12 +105,14 @@ void setupWebSocket(
             ws_open = false;
             if(was_connected && reconnect_deadline == 0){
                 reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
+                next_reconnect_attempt = getTimeNow64();
             }
             std::cout << "Close signal received\n";
         } else if (msg->type == Type::Error) {
             ws_open = false;
             if(was_connected && reconnect_deadline == 0){
                 reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
+                next_reconnect_attempt = getTimeNow64();
             }
             std::cerr << "WS Error: " << msg->errorInfo.reason << "\n";
         }
@@ -163,7 +168,8 @@ int main() {
     std::atomic<bool> ws_open{false};
     std::atomic<bool> was_connected{false};
     std::atomic<uint64_t> reconnect_deadline{0};
-    setupWebSocket(webSocket, ws_open, was_connected, reconnect_deadline);
+    std::atomic<uint64_t> next_reconnect_attempt{0};
+    setupWebSocket(webSocket, ws_open, was_connected, reconnect_deadline, next_reconnect_attempt);
 
     // CAN queue
     std::mutex m;
@@ -172,6 +178,8 @@ int main() {
     
 
     webSocket.start();
+
+    next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS;
 
     int can0_fd = openCANSocket("can0");
     if(can0_fd < 0) {
@@ -194,27 +202,27 @@ int main() {
     //     readCAN(can1_fd, m, q, running);
     // })
 
-    while(webSocket.getReadyState() != ix::ReadyState::Open) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
 
     // Sender loop
-    std::cout << "Sending data...\nPress Ctrl+C to quit\n";
+    std::cout << "Starting sender loop...\nPress Ctrl+C to quit\n";
     while (true) { 
+
+        // -- Reconnect logic --
         if(!ws_open){
-            // check if reconnect deadline has passed
-            if(was_connected && 
-               reconnect_deadline != 0 && 
+            // check if reconnect deadline has passed, close program if so
+            if(reconnect_deadline != 0 && 
                getTimeNow64() >= reconnect_deadline) {
                 std::cout << "Websocket closed.\n";
                 break;
             }
-            // Try to restart websocket if it's not open
-            if(was_connected) {
+            // Try to restart websocket if it's not open next_reconnect_attempt has passed
+            if(next_reconnect_attempt != 0 && 
+               getTimeNow64() >= next_reconnect_attempt){
                 webSocket.stop();
                 webSocket.start(); 
+                next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
 
