@@ -30,7 +30,7 @@
 */
 struct pi_to_server {
     uint32_t timestamp;
-    uint8_t id;
+    uint32_t id;
     uint8_t length;
     uint8_t bytes[8];
 } __attribute__((packed));
@@ -53,7 +53,7 @@ std::string url = "ws://100.85.246.127:8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second interval between reconnect attempts
 
-static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes"); // Constantly checks that packet is the right size
+static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
 
 static int openCANSocket(const char* ifname){
     int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
