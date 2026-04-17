@@ -145,9 +145,6 @@ void readCAN(int can_fd, std::mutex& m, std::queue<pi_to_server>& q, std::atomic
             raw_id = (frame.can_id & CAN_SFF_MASK);   // 11-bit standard
         }
 
-        #ifdef DEBUG_CAN_RX
-        dbg_can::print_frame(frame, raw_id);
-        #endif
 
         pkt.id = raw_id;
 
