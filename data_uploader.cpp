@@ -201,7 +201,7 @@ int main() {
     // CAN1 reader thread
     std::thread can1_thread([&](){
         readCAN(can1_fd, m, q, running);
-    })
+    });
 
 
     // Sender loop
