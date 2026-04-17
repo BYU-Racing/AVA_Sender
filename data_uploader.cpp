@@ -50,8 +50,8 @@ static uint32_t getTimeNow32() {
 
 // ===== Main code =====
 std::string url = "ws://100.85.246.127:8000/api/ws/send";
-const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds
-const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second
+const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
+const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second interval between reconnect attempts
 
 static_assert(sizeof(pi_to_server) == 14, "pi_to_server must be 14 bytes"); // Constantly checks that packet is the right size
 
@@ -176,28 +176,32 @@ int main() {
 
     webSocket.start();
 
-    next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS;
+    // first reconnect attempt is RETRY_INTERVAL_MS after start
+    next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS; 
 
+    // open file desc for CAN0
     int can0_fd = openCANSocket("can0");
     if(can0_fd < 0) {
         std::cerr << "Failed to open CAN0 socket\n";
         return 1;
     }
 
-    // int can1_fd = openCANSocket("can1");
-    // if(can1_fd < 0) {
-    //     std::cerr << "Failed to open CAN1 socket\n";
-    //     return 1;
-    // }
+    // open file desc for CAN1
+    int can1_fd = openCANSocket("can1");
+    if(can1_fd < 0) {
+        std::cerr << "Failed to open CAN1 socket\n";
+        return 1;
+    }
 
     // CAN0 reader thread
     std::thread can_thread([&](){
         readCAN(can0_fd, m, q, running);
     });
 
-    // std::thread can1_thread([&](){
-    //     readCAN(can1_fd, m, q, running);
-    // })
+    // CAN1 reader thread
+    std::thread can1_thread([&](){
+        readCAN(can1_fd, m, q, running);
+    })
 
 
     // Sender loop
@@ -223,11 +227,12 @@ int main() {
             continue;
         }
 
+
         pi_to_server pkt {};
         bool unlocked = false;
         {
             std::lock_guard<std::mutex> lock(m);
-            if (!q.empty()){
+            if (!q.empty()){ // if queue isn't empty, pop front pkt
                 pkt = q.front();
                 q.pop();
                 unlocked = true;
@@ -238,14 +243,16 @@ int main() {
             continue;
         }
 
+        // Send pkt as binary over websocket
         std::string payload(sizeof(pkt), '\0');
         std::memcpy(payload.data(), &pkt, sizeof(pkt));
         webSocket.sendBinary(payload);
     }
     
+    // Cleanup
     running = false;
     close(can0_fd);
-    // close(can1_fd);
+    close(can1_fd);
     can_thread.join();
     webSocket.stop();
     ix::uninitNetSystem();
