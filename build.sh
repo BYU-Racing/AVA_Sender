@@ -22,6 +22,7 @@ for arg in "$@"; do
   esac
 done
 
+# Remove old build dir
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
