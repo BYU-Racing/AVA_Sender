@@ -254,6 +254,7 @@ int main() {
     close(can0_fd);
     close(can1_fd);
     can_thread.join();
+    can1_thread.join();
     webSocket.stop();
     ix::uninitNetSystem();
 
