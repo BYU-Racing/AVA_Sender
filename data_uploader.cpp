@@ -182,6 +182,7 @@ void readCAN(
         struct can_frame frame {};
         int n = read(can_fd, &frame, sizeof(frame));
         if (n < 0) {
+            if (!running) break;
             perror("read(can)");
             continue;
         }
@@ -244,8 +245,17 @@ int main() {
     std::atomic<bool> running{true}; // Atomic so that all threads can read it safely
 
     // ASC file setup
-    std::ofstream asc_file("can_log.asc");
     std::mutex asc_mutex;
+    std::string asc_filename = "can_log_" + std::to_string(start_time_ms) + ".asc";
+    std::ofstream asc_file(asc_filename);
+    if (!asc_file.is_open()) {
+        std::cerr << "Failed to open " << asc_filename << "\n";
+        return 1;
+    }
+    asc_file << "date\n";
+    asc_file << "base hex timestamps absolute\n";
+    asc_file << "internal events logged\n";
+    asc_file << "Begin Triggerblock\n";
 
     webSocket.start();
 
@@ -329,14 +339,17 @@ int main() {
         std::memcpy(payload.data(), &q_pkt.pkt, sizeof(q_pkt.pkt));
 
         auto info = webSocket.sendBinary(payload);
-        if (info.success){
+        if (info.success){ // If sent successfully, pop from queue
             std::lock_guard<std::mutex> lock(m);
             if (!q.empty()) {
                 q.pop();
             }
-        } else {
+        } else { // If failed to send, retry; if too many retries, reconnect
+            std::lock_guard<std::mutex> lock(m);
             if(q.front().retries++ >= NUM_PACKET_RETRIES){
                 std::cerr << "Failed to send packet after " << NUM_PACKET_RETRIES << " retries. Reconnecting.\n";
+                q.front().retries = 0;
+                q.front().last_send_attempt = 0;
                 ws_open = false;
                 webSocket.stop();
                 continue;
@@ -346,6 +359,7 @@ int main() {
     }
     
     // Cleanup
+    asc_file << "End Triggerblock\n";
     running = false;
     shutdown(can0_fd, SHUT_RD);
     shutdown(can1_fd, SHUT_RD);
