@@ -4,7 +4,8 @@ import struct
 import time
 import websockets
 
-WS_URL = "ws://100.85.246.127:8000/api/ws/send"
+# WS_URL = "ws://100.85.246.127:8000/api/ws/send"
+WS_URL = "ws://3.133.148.175:8000/api/ws/send"
 
 # struct pi_to_server:
 # uint32_t timestamp; uint32_t id; uint8_t length; uint8_t bytes[8];
@@ -269,7 +270,7 @@ async def main():
             msg_id = DBC_MESSAGE_IDS[msg_index]
             pkt = make_packet(msg_id)
             await ws.send(pkt)  # sends as binary frame
-            await asyncio.sleep(0.002)  # in sec
+            await asyncio.sleep(0.00005)  # in sec
             msg_index = (msg_index + 1) % len(DBC_MESSAGE_IDS)
 
 if __name__ == "__main__":
