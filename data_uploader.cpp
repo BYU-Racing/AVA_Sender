@@ -75,6 +75,7 @@ void handleSignal(int) {
 // ===== Main code =====
 static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
 
+// Writes a CAN frame to an ASC (ASCII) log file with a timestamp relative to the start time.
 void writeASCFrame(
     std::ofstream& file,
     std::mutex& file_mutex,
@@ -108,6 +109,7 @@ void writeASCFrame(
     file << std::dec << std::setfill(' ') << "\n";
 }
 
+// Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1 on failure.
 static int openCANSocket(const char* ifname){
     int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if(s < 0){
@@ -197,7 +199,7 @@ void readCAN(
         }
 
         int channel = can_str == "can0" ? 1 : 2;
-        writeASCFrame(asc_file, asc_mutex, channel, frame, start_time_ms);
+        // writeASCFrame(asc_file, asc_mutex, channel, frame, start_time_ms);
 
         // Extract raw CAN identifier (strip flags)
         uint32_t raw_id = 0;
