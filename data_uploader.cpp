@@ -29,7 +29,8 @@ const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second interval between reconnect 
 const uint64_t RESEND_INTERVAL_MS = 50; // 50 ms interval between resending failed messages
 const uint16_t NUM_PACKET_RETRIES = 20; // Retries sending a packet this many times, then closes
 
-/*
+/*  Data struct for sending CAN frame to server, packed to avoid padding.
+    Struct for queued packet as well for retrying failed sends.
 {
     timestamp: int,
     id: int,
@@ -72,42 +73,9 @@ void handleSignal(int) {
     stop_requested = 1;
 }
 
+
 // ===== Main code =====
 static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
-
-// Writes a CAN frame to an ASC (ASCII) log file with a timestamp relative to the start time.
-void writeASCFrame(
-    std::ofstream& file,
-    std::mutex& file_mutex,
-    int channel,
-    const can_frame& frame,
-    uint64_t start_time_ms
-) {
-    uint64_t now_ms = getTimeNow64();
-    double timestamp = (now_ms - start_time_ms) / 1000.0;
-
-    uint32_t raw_id = frame.can_id & CAN_EFF_FLAG
-        ? frame.can_id & CAN_EFF_MASK
-        : frame.can_id & CAN_SFF_MASK;
-
-    std::lock_guard<std::mutex> lock(file_mutex);
-
-    file << std::fixed << std::setprecision(6)
-         << timestamp << " "
-         << channel << " "
-         << std::hex << std::uppercase << raw_id
-         << std::dec << " Rx d "
-         << (int)frame.can_dlc;
-
-    for (int i = 0; i < frame.can_dlc && i < 8; i++) {
-        file << " "
-             << std::hex << std::uppercase
-             << std::setw(2) << std::setfill('0')
-             << (int)frame.data[i];
-    }
-
-    file << std::dec << std::setfill(' ') << "\n";
-}
 
 // Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1 on failure.
 static int openCANSocket(const char* ifname){
@@ -175,10 +143,9 @@ void setupWebSocket(
 }
 
 void readCAN(
-    int can_fd, std::string can_str, 
+    int can_fd;
     std::mutex& m, std::queue<queued_packet>& q, 
-    std::atomic<bool>& running, std::ofstream& asc_file, 
-    std::mutex& asc_mutex, uint64_t start_time_ms
+    std::atomic<bool>& running
     ) {
     while (running) {
         struct can_frame frame {};
@@ -197,9 +164,6 @@ void readCAN(
         if (frame.can_id & CAN_ERR_FLAG) {
             continue;
         }
-
-        int channel = can_str == "can0" ? 1 : 2;
-        // writeASCFrame(asc_file, asc_mutex, channel, frame, start_time_ms);
 
         // Extract raw CAN identifier (strip flags)
         uint32_t raw_id = 0;
@@ -231,7 +195,6 @@ void readCAN(
 
 int main() {
     std::signal(SIGINT, handleSignal);
-    uint64_t start_time_ms = getTimeNow64();
 
     // Websocket setup
     ix::WebSocket webSocket;
@@ -246,18 +209,6 @@ int main() {
     std::queue<queued_packet> q;
     std::atomic<bool> running{true}; // Atomic so that all threads can read it safely
 
-    // ASC file setup
-    std::mutex asc_mutex;
-    std::string asc_filename = "can_log_" + std::to_string(start_time_ms) + ".asc";
-    std::ofstream asc_file(asc_filename);
-    if (!asc_file.is_open()) {
-        std::cerr << "Failed to open " << asc_filename << "\n";
-        return 1;
-    }
-    asc_file << "date\n";
-    asc_file << "base hex timestamps absolute\n";
-    asc_file << "internal events logged\n";
-    asc_file << "Begin Triggerblock\n";
 
     webSocket.start();
 
@@ -280,12 +231,12 @@ int main() {
 
     // CAN0 reader thread
     std::thread can0_thread([&](){
-        readCAN(can0_fd, "can0", m, q, running, asc_file, asc_mutex, start_time_ms);
+        readCAN(can0_fd, m, q, running);
     });
 
     // CAN1 reader thread
     std::thread can1_thread([&](){
-        readCAN(can1_fd, "can1", m, q, running, asc_file, asc_mutex, start_time_ms);
+        readCAN(can1_fd, m, q, running);
     });
 
 
@@ -361,7 +312,6 @@ int main() {
     }
     
     // Cleanup
-    asc_file << "End Triggerblock\n";
     running = false;
     shutdown(can0_fd, SHUT_RD);
     shutdown(can1_fd, SHUT_RD);
