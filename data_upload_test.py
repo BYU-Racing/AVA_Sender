@@ -2,10 +2,11 @@ import asyncio
 import random
 import struct
 import time
+
 import websockets
 
 # WS_URL = "ws://100.85.246.127:8000/api/ws/send"
-WS_URL = "ws://3.133.148.175:8000/api/ws/send"
+WS_URL = "ws://3.134.99.146:8000/api/ws/send"
 
 # struct pi_to_server:
 # uint32_t timestamp; uint32_t id; uint8_t length; uint8_t bytes[8];
@@ -14,9 +15,33 @@ FMT = "<I I B 8s"
 assert struct.calcsize(FMT) == 17
 
 DBC_MESSAGE_IDS = [
-    0, 1, 2, 3, 4, 5, 6, 9,
-    160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 176, 177,
-    192, 193, 194,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    9,
+    160,
+    161,
+    162,
+    163,
+    164,
+    165,
+    166,
+    167,
+    168,
+    169,
+    170,
+    171,
+    172,
+    173,
+    176,
+    177,
+    192,
+    193,
+    194,
 ]
 
 
@@ -48,7 +73,7 @@ def pack_int16s(*values: int) -> bytearray:
     data = bytearray(8)
     for index, value in enumerate(values):
         start = index * 2
-        data[start:start + 2] = i16(value)
+        data[start : start + 2] = i16(value)
     return data
 
 
@@ -85,9 +110,9 @@ def make_can_payload(msg_id: int) -> tuple[int, bytearray]:
         case 4:  # RVC multiplexed float32
             mux = random.randint(0, 5)
             values = {
-                0: random.uniform(-3.0, 3.0),      # X acceleration
-                1: random.uniform(-3.0, 3.0),      # Y acceleration
-                2: random.uniform(-3.0, 3.0),      # Z acceleration
+                0: random.uniform(-3.0, 3.0),  # X acceleration
+                1: random.uniform(-3.0, 3.0),  # Y acceleration
+                2: random.uniform(-3.0, 3.0),  # Z acceleration
                 3: random.uniform(-180.0, 180.0),  # X rotation
                 4: random.uniform(-180.0, 180.0),  # Y rotation
                 5: random.uniform(-180.0, 180.0),  # Z rotation
@@ -197,15 +222,15 @@ def make_can_payload(msg_id: int) -> tuple[int, bytearray]:
             set_bits(data, 33, 1, random.randint(0, 1))  # SelfSensingAssistActive
             set_bits(data, 37, 3, random.randint(0, 4))  # InverterDischarge
             set_bits(data, 40, 1, random.randint(0, 1))  # InverterCommandMode
-            set_bits(data, 44, 4, random.randint(0, 15)) # InverterRollingCounter
+            set_bits(data, 44, 4, random.randint(0, 15))  # InverterRollingCounter
             return 8, data
 
         case 171:  # FaultCodes
             return 8, bytearray(
-                u16(random.choice([0, 0, 0, 1, 2, 4])) +
-                u16(random.choice([0, 0, 0, 1, 2, 4])) +
-                u16(random.choice([0, 0, 0, 1, 2, 4])) +
                 u16(random.choice([0, 0, 0, 1, 2, 4]))
+                + u16(random.choice([0, 0, 0, 1, 2, 4]))
+                + u16(random.choice([0, 0, 0, 1, 2, 4]))
+                + u16(random.choice([0, 0, 0, 1, 2, 4]))
             )
 
         case 172:  # TorqueAndTimerInfo
@@ -261,17 +286,21 @@ def make_can_payload(msg_id: int) -> tuple[int, bytearray]:
                 data[index] = random.randint(0, 255)
             return 8, data
 
+
 async def main():
     msg_index = 0
     print(f"Connecting to {WS_URL}")
     async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=20) as ws:
-        print(f"Connected. Sending fake packets for {len(DBC_MESSAGE_IDS)} DBC IDs (Ctrl+C to stop).")
+        print(
+            f"Connected. Sending fake packets for {len(DBC_MESSAGE_IDS)} DBC IDs (Ctrl+C to stop)."
+        )
         while True:
             msg_id = DBC_MESSAGE_IDS[msg_index]
             pkt = make_packet(msg_id)
             await ws.send(pkt)  # sends as binary frame
             await asyncio.sleep(0.00005)  # in sec
             msg_index = (msg_index + 1) % len(DBC_MESSAGE_IDS)
+
 
 if __name__ == "__main__":
     try:

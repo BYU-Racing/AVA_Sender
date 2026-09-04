@@ -23,7 +23,7 @@
 #include <fstream>
 
 // ===== Structs and Constants =====
-std::string url = "ws://100.85.246.127:8000/api/ws/send";
+std::string url = "ws://3.134.99.146:8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50; // 50 ms interval between resending failed messages
