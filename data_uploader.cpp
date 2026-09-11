@@ -24,9 +24,9 @@
 #include <sstream>
 #include <fstream>
 
-// ===== Structs and Constants =====
-std::string url_prefix = "ws://";
-std::string url_suffix = ":8000/api/ws/send";
+// ========== Structs and Constants ==========
+const std::string url_prefix = "ws://";
+const std::string url_suffix = ":8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50; // 50 ms interval between resending failed messages
@@ -54,11 +54,12 @@ struct queued_packet {
     uint16_t retries;
 };
 
-// ===== Global Variables =====
+
+// ========== Non-Constant Global Variables ==========
 volatile std::sig_atomic_t stop_requested = 0;
 
 
-// ===== Helper Functions =====
+// ========== Helper Functions ==========
 
 // Monotonic timestamp in ms (relative to start)
 static inline uint64_t getTimeNow64()
@@ -87,7 +88,7 @@ std::string getEnvVar(const char* name) {
 }
 
 
-// ===== Main code =====
+// ========== Main code ==========
 static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
 
 // Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1 on failure.
@@ -115,7 +116,7 @@ static int openCANSocket(const char* ifname){
 
 // Sets up websocket with URL and sets up message callback function
 void setupWebSocket(
-    ix::WebSocket& webSocket, const std::string url, std::atomic<bool>& ws_open, 
+    ix::WebSocket& webSocket, const std::string& url, std::atomic<bool>& ws_open, 
     std::atomic<bool>& was_connected, std::atomic<uint64_t>& reconnect_deadline,
     std::atomic<uint64_t>& next_reconnect_attempt
     ) {
@@ -123,9 +124,7 @@ void setupWebSocket(
     ix::initNetSystem();
 
     webSocket.setUrl(url);
-
     webSocket.disableAutomaticReconnection(); 
-
     webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr& msg) {
         using Type = ix::WebSocketMessageType;
 
@@ -211,14 +210,13 @@ int main() {
     std::signal(SIGTERM, handleSignal);
 
     std::string server_ip;
-    std::string url;
     try{
         server_ip = getEnvVar("AVA_SERVER_IP");
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n";
         return 1;
     }
-    url = url_prefix + server_ip + url_suffix;
+    const std::string url = url_prefix + server_ip + url_suffix;
 
     // Websocket setup
     ix::WebSocket webSocket;
