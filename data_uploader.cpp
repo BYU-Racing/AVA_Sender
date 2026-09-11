@@ -143,7 +143,7 @@ void setupWebSocket(
 }
 
 void readCAN(
-    int can_fd;
+    int can_fd,
     std::mutex& m, std::queue<queued_packet>& q, 
     std::atomic<bool>& running
     ) {
