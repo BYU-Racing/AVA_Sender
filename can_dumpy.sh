@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 OUT_DIR="/home/ava3/AVA_Sender/Logs"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
