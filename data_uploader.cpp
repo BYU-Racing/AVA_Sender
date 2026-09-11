@@ -195,6 +195,7 @@ void readCAN(
 
 int main() {
     std::signal(SIGINT, handleSignal);
+    std::signal(SIGTERM, handleSignal);
 
     // Websocket setup
     ix::WebSocket webSocket;
