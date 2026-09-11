@@ -25,6 +25,8 @@ URL_PREFIX = "ws://"
 URL_SUFFIX = ":8000/api/ws/send"
 WS_URL = URL_PREFIX + IP + URL_SUFFIX
 
+SEND_FQ_HZ = 20
+
 # struct pi_to_server:
 # uint32_t timestamp; uint32_t id; uint8_t length; uint8_t bytes[8];
 # Packed, little-endian -> "<I I B 8s" = 17 bytes
@@ -315,7 +317,7 @@ async def main():
             msg_id = DBC_MESSAGE_IDS[msg_index]
             pkt = make_packet(msg_id)
             await ws.send(pkt)  # sends as binary frame
-            await asyncio.sleep(0.00005)  # in sec
+            await asyncio.sleep(1 / SEND_FQ_HZ)  # in sec
             msg_index = (msg_index + 1) % len(DBC_MESSAGE_IDS)
 
 
