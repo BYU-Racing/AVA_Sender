@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 import struct
 import time
@@ -6,7 +7,7 @@ import time
 import websockets
 
 # IP = "100.77.34.55"
-IP = "localhost"
+IP = os.getenv("AVA_SERVER_IP", "localhost")
 URL_PREFIX = "ws://"
 URL_SUFFIX = ":8000/api/ws/send"
 WS_URL = URL_PREFIX + IP + URL_SUFFIX
