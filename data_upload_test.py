@@ -2,12 +2,25 @@ import asyncio
 import os
 import random
 import struct
+import sys
 import time
+from pathlib import Path
 
 import websockets
+from dotenv import load_dotenv
 
 # IP = "100.77.34.55"
-IP = os.getenv("AVA_SERVER_IP", "localhost")
+ENV_FILE = Path(__file__).resolve().with_name(".env")
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
+else:
+    print(
+        f"Warning: .env file not found at {ENV_FILE}. \
+        Run `cp .env.example .env` and edit it to set the AVA_SERVER_IP."
+    )
+    sys.exit(1)
+
+IP = os.environ["AVA_SERVER_IP"]
 URL_PREFIX = "ws://"
 URL_SUFFIX = ":8000/api/ws/send"
 WS_URL = URL_PREFIX + IP + URL_SUFFIX
