@@ -80,7 +80,7 @@ void handleSignal(int) {
 std::string getEnvVar(const char* name) {
     const char* value = std::getenv(name);
 
-    if (value == nullptr || value == '\0') {
+    if (value == nullptr || *value == '\0') {
         throw std::runtime_error(std::string("Environment variable not set: ") + name);
     }
 
