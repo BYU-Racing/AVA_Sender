@@ -9,7 +9,10 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <stdexcept>
 #include <cstdint>
+#include <cstdlib>
+#include <csignal>
 #include <cstring>
 #include <string>
 #include <atomic>
@@ -19,11 +22,11 @@
 #include <thread>
 #include <iomanip>
 #include <sstream>
-#include <csignal>
 #include <fstream>
 
 // ===== Structs and Constants =====
-std::string url = "ws://100.77.34.55:8000/api/ws/send";
+std::string url_prefix = "ws://";
+std::string url_suffix = ":8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50; // 50 ms interval between resending failed messages
@@ -73,6 +76,16 @@ void handleSignal(int) {
     stop_requested = 1;
 }
 
+std::string getEnvVar(const char* name) {
+    const char* value = std::getenv(name);
+
+    if (value == nullptr || value == '\0') {
+        throw std::runtime_error(std::string("Environment variable not set: ") + name);
+    }
+
+    return std::string(value);
+}
+
 
 // ===== Main code =====
 static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
@@ -102,7 +115,7 @@ static int openCANSocket(const char* ifname){
 
 // Sets up websocket with URL and sets up message callback function
 void setupWebSocket(
-    ix::WebSocket& webSocket, std::atomic<bool>& ws_open, 
+    ix::WebSocket& webSocket, const std::string url, std::atomic<bool>& ws_open, 
     std::atomic<bool>& was_connected, std::atomic<uint64_t>& reconnect_deadline,
     std::atomic<uint64_t>& next_reconnect_attempt
     ) {
@@ -197,13 +210,23 @@ int main() {
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
+    std::string server_ip;
+    std::string url;
+    try{
+        server_ip = getEnvVar("AVA_SERVER_IP");
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
+    }
+    url = url_prefix + server_ip + url_suffix;
+
     // Websocket setup
     ix::WebSocket webSocket;
     std::atomic<bool> ws_open{false};
     std::atomic<bool> was_connected{false};
     std::atomic<uint64_t> reconnect_deadline{0};
     std::atomic<uint64_t> next_reconnect_attempt{0};
-    setupWebSocket(webSocket, ws_open, was_connected, reconnect_deadline, next_reconnect_attempt);
+    setupWebSocket(webSocket, url, ws_open, was_connected, reconnect_deadline, next_reconnect_attempt);
 
     // CAN queue
     std::mutex m;
