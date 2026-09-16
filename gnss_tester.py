@@ -28,7 +28,8 @@ def read_sat_data():
             f"Num Sat: {msg.numSV}, Alti: {msg.alt}, Fix: {msg.quality}"
         )
     # quality:  fix type—commonly 0 invalid, 1 standalone,
-    #           2 differential, 4 RTK fixed, 5 RTK float.
+    #           2 differential, 4 RTK fixed, 5 RTK float, 6 dead reckoning.
+    # 4 is the best, 5 is almost there, 2 is good, 1 is bad, 0 means no fix
 
     # elif msg.msgID == "GSV":  # Diagnostics on GNSS satellites in view
     #     print(f"3-GSV Num Sat: {msg.numSV}")
