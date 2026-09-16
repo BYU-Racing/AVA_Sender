@@ -1,7 +1,7 @@
 from pyubx2 import UBXReader
 from serial import Serial
 
-port = "/dev/ttyUSB4"
+port = "/dev/ttyACM0"
 baud = 115200
 
 stream = Serial(port, baud, timeout=1)
