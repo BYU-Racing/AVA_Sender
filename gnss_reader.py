@@ -1,14 +1,22 @@
 from pyubx2 import UBXReader
 from serial import Serial
 
-stream = Serial("/dev/ttyUSB4", 115200, timeout=1)
+port = "/dev/ttyUSB4"
+baud = 115200
+
+stream = Serial(port, baud, timeout=1)
 ubr = UBXReader(stream)
+
+print(f"Listening on {port} at {baud} baud...", flush=True)
 
 while True:
     raw, msg = ubr.read()
 
     if msg is None:
+        print("No GNSS message received (read timeout)", flush=True)
         continue
+
+    print(msg, flush=True)
 
     # -----------------------------
     # Position / fix information
