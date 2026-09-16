@@ -62,6 +62,7 @@ while True:
     # Satellite signal quality
     # -----------------------------
     elif msg.identity == "NAV-SAT":
+        print("Satellites reported (NAV-SAT):", msg.numSvs, flush=True)
         cn0_values = []
 
         for i in range(msg.numSvs):
