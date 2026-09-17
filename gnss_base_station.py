@@ -11,6 +11,7 @@ from pyubx2 import (
     protocol,
 )
 from serial import Serial
+from websockets.sync.client import connect
 
 # port = "/dev/ttyACM0" # Linux
 port = "COM5"  # Windows
@@ -18,6 +19,11 @@ baud = 115200
 
 ser = Serial(port, baud, timeout=1)
 ubx = UBXReader(ser, protfilter=RTCM3_PROTOCOL | UBX_PROTOCOL)
+
+WS_PREFIX = "ws://"
+WS_SUFFIX = ":8080/rtk"
+ws_ip = "localhost"
+ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
 
 # Configure the F9P for survey-in mode to find base station location
@@ -78,17 +84,18 @@ start_survey_in()
 while not check_survey_in():
     pass
 
-while True:  # Main loop
-    raw, msg = ubx.read()
+with connect(ws_url) as ws:
+    print(f"Connected to WS at {ws_url}", flush=True)
+    while True:  # Main loop
+        raw, msg = ubx.read()
 
-    if msg is None:
-        print("No GNSS message received (read timeout)", flush=True)
-        continue
+        if msg is None:
+            print("No GNSS message received (read timeout)", flush=True)
+            continue
 
-    if protocol(raw) == RTCM3_PROTOCOL:
-        print(
-            f"RTCM3 message received: {msg.identity}, length: {len(raw)} bytes",
-            flush=True,
-        )
-        # Here you would typically send the raw RTCM3 bytes to the rover over a WebSocket or other communication method
-# Read RTCM3 bytes and send them directly over WS to the rover for RTK corrections
+        if protocol(raw) == RTCM3_PROTOCOL:
+            ws.send(raw)
+            print(
+                f"RTCM3 sent: {msg.identity}, length: {len(raw)} bytes",
+                flush=True,
+            )
