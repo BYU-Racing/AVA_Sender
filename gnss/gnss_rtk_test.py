@@ -2,14 +2,13 @@
 # Author:   Blake Hill
 
 import threading
+
 from pyubx2 import (
-    RTCM3_PROTOCOL,
     SET_LAYER_RAM,
     TXN_NONE,
     UBX_PROTOCOL,
     UBXMessage,
     UBXReader,
-    protocol,
 )
 from serial import Serial
 from websockets.sync.client import connect
@@ -26,6 +25,8 @@ ser = Serial(port, baud, timeout=1)
 ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
 
 ws = connect(ws_url)
+stop_event = threading.Event()
+
 
 def config_ubx():
     config = [
@@ -41,12 +42,21 @@ def config_ubx():
         # Report whether received RTCM messages were accepted
         ("CFG_MSGOUT_UBX_RXM_RTCM_USB", 1),
     ]
-    
+
     command = UBXMessage(SET_LAYER_RAM, TXN_NONE, config)
     ser.write(command.serialize())
     ser.flush()
 
-while True:
-    raw, msg = ubx.read()
-    
-    if msg.identity == 
+
+def read_from_ubx() -> None:
+    # carrSoln = carrier-range solution status
+    solution_status = {0: "No RTK", 1: "RTK float", 2: "RTK fixed"}
+    while not stop_event.is_set():
+        raw, msg = ubx.read()
+
+        if msg is None:
+            continue
+
+        if msg.identity == "NAV-PVT":
+            solution = solution_status.get(msg.carrSoln, f"Unknown ({msg.carrSoln})")
+            print(f"")
