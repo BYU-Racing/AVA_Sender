@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <csignal>
 #include <cstring>
 #include <string>
@@ -114,12 +115,22 @@ static int openCANSocket(const char* ifname){
     return s;
 }
 
+
 // Sets up websocket with URL and sets up message callback function
 void setupWebSocket(
     ix::WebSocket& webSocket, const std::string& url, std::atomic<bool>& ws_open, 
     std::atomic<bool>& was_connected, std::atomic<uint64_t>& reconnect_deadline,
     std::atomic<uint64_t>& next_reconnect_attempt
     ) {
+    
+    // Closes WS and sets reconnect_deadline
+    auto close_ws = [&]() {
+        ws_open = false;
+        if(was_connected && reconnect_deadline == 0){
+            reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
+            next_reconnect_attempt = getTimeNow64();
+        }
+    }
 
     ix::initNetSystem();
 
@@ -135,21 +146,17 @@ void setupWebSocket(
             next_reconnect_attempt = 0;
             std::cout << "Connected to WS" << "\n";
         } else if (msg->type == Type::Message) {
-            std::cout << "Received text msg: " << msg->str << "\n";
+            std::printf("Received text msg: %s\n", msg->str);
         } else if (msg->type == Type::Close) {
-            ws_open = false;
-            if(was_connected && reconnect_deadline == 0){
-                reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
-                next_reconnect_attempt = getTimeNow64();
-            }
-            std::cout << "Close signal received\n";
+            close_ws();
+            std::printf("Close signal received\n");
         } else if (msg->type == Type::Error) {
-            ws_open = false;
-            if(was_connected && reconnect_deadline == 0){
-                reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
-                next_reconnect_attempt = getTimeNow64();
-            }
-            std::cerr << "WS Error: " << msg->errorInfo.reason << "\n";
+            close_ws();
+            std::fprintf(stderr, "WS Error: %s\n", msg->errorInfo.reason);
+        } else if (msg->type == Type::Ping){
+            std::printf("Received ping %s\n", msg->str);
+        } else if (msg->type == Type::Pong) {
+            std::printf("Received pong %s\n", msg->str);
         }
     });
 }
@@ -240,14 +247,14 @@ int main() {
     // open file desc for CAN0
     int can0_fd = openCANSocket("can0");
     if(can0_fd < 0) {
-        std::cerr << "Failed to open CAN0 socket\n";
+        std::perror("Failed to open CAN0 socket");
         return 1;
     }
 
     // open file desc for CAN1
     int can1_fd = openCANSocket("can1");
     if(can1_fd < 0) {
-        std::cerr << "Failed to open CAN1 socket\n";
+        std::perror("Failed to open CAN1 socket");
         return 1;
     }
 
