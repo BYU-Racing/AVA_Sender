@@ -13,12 +13,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(IXWebSocket)
 
+find_package(Boost REQUIRED)
+
 add_executable(ava_sender data_uploader.cpp)
 
 # Enable TLS in IX (uses OpenSSL on Linux by default when enabled)
 # (IX's CMake options are documented in their build docs.) 
 # We'll just link to the target; the FetchContent build will honor defaults/options.
-target_link_libraries(ava_sender PRIVATE ixwebsocket atomic)
+target_link_libraries(ava_sender PRIVATE ixwebsocket atomic Boost::boost)
 
 # If you want to force TLS ON explicitly:
 # set(USE_TLS ON CACHE BOOL "" FORCE)

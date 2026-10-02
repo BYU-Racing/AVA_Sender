@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <boost/circular_buffer.hpp>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -26,12 +27,17 @@
 #include <thread>
 
 // ========== Structs and Constants ==========
+#define UBX_BYTE_1 0xB5
+#define UBX_BYTE_2 0x62
+#define CIRC_BUF_OVERHEAD 8
+
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
 const uint16_t NUM_PACKET_RETRIES = 20;    // Retries sending a packet this many times, then closes
+const size_t GNSS_BUF_SIZE = 1024;         // Buffer size for reading GNSS data
 
 /*  Data struct for sending CAN frame to server, packed to avoid padding.
     Struct for queued packet as well for retrying failed sends.
@@ -85,16 +91,76 @@ std::string getEnvVar(const char *name) {
     return std::string(value);
 }
 
-<<<<<<< HEAD
+// MARK: GNSS Helper Functions
+void config_gnss() {}
+
+static readSerialData();
+
+processReceiveBuffer();
+
+bool tryExtractUbxFrame(
+    boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame
+) {
+    if (data_buf.empty() ||
+        data_buf.size() < CIRC_BUF_OVERHEAD) { // Minimum UBX frame size is 8 bytes
+        return false;
+    }
+    while (data_buf.size() >= CIRC_BUF_OVERHEAD) {
+        if (data_buf[0] == UBX_BYTE_1 && data_buf[1] == UBX_BYTE_2) {
+            break; // Found potential UBX frame start
+        } else {
+            data_buf.erase_begin(1); // Remove the first byte and continue searching
+        }
+    }
+    if ((data_buf[0] & UBX_BYTE_1) && (data_buf[1] & UBX_BYTE_2)) {
+        uint16_t data_len = data_buf[4] | data_buf[5] << 8; // Length is little-endian
+        uint16_t frame_len = data_len + CIRC_BUF_OVERHEAD;  // Total length of the UBX frame
+        if (data_buf.size() < frame_len) {
+            return false;
+        } else {
+            std::vector<std::uint8_t> frame(data_buf.begin(), data_buf.begin() + frame_len);
+            if (!validateUbxChecksum(frame, data_len)) {
+                perror("Invalid UBX checksum");
+                return false;
+            }
+            if (data_buf.size() < frame_len) {
+                perror("Not enough data for full UBX frame");
+                return false;
+            }
+            ubx_frame = frame;
+            data_buf.erase_begin(frame_len);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool validateUbxChecksum(std::vector<std::uint8_t> frame, uint16_t length) {
+    uint8_t CHECKSUM_A = frame[6 + length];
+    uint8_t CHECKSUM_B = frame[7 + length];
+    uint8_t ck_a = 0;
+    uint8_t ck_b = 0;
+    for (size_t i = 2; i < length + 6; i++) {
+        ck_a += frame[i];
+        ck_b += ck_a;
+    }
+    return (ck_a == CHECKSUM_A && ck_b == CHECKSUM_B);
+}
+
+handleUbxMessage();
+
+handleNavPvt();
+
+handleNavSvin();
+
+handleRxmRtcm();
+
+static void handleAck();
+
 // MARK: Main Code
 static_assert(
     sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"
 ); // Constantly checks that packet is the right size
-=======
-//MARK: GNSS Reader
-// gnssReader reads the corrected data from the chip.
-
->>>>>>> 655ff2cffca01a9d6d09681bac034a297db9ffc6
 
 // Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1
 // on failure.
@@ -171,6 +237,39 @@ void setupWebSocket(
     });
 }
 
+// MARK: GNSS Reader
+void gnssReader(
+    int gnss_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomic<bool> &running
+) {
+    boost::circular_buffer<std::uint8_t> data_buf(GNSS_BUF_SIZE);
+    std::vector<std::uint8_t> ubx_frame;
+    while (running) {
+        uint16_t freespace = data_buf.capacity() - data_buf.size();
+        if (freespace == 0) {
+            continue; // Buffer is full, wait for processing
+        }
+        ssize_t bytes_read = read(gnss_fd, data_buf.data(), freespace);
+        if (bytes_read > 0) { // Process the received GNSS data
+            if (tryExtractUbxFrame(data_buf, ubx_frame)) {
+                // Process the extracted UBX frame
+                handleUbxMessage(ubx_frame);
+            }
+        } else if (bytes_read == 0) { // Read no bytes
+            continue;
+        } else if (bytes_read < 0) { // Error reading from GNSS device
+            if (errno == EINTR) {
+                continue; // Interrupted by signal, retry reading
+            } else {
+                if (!running)
+                    break;
+                perror("read(gnss)");
+                continue;
+            }
+        }
+    }
+}
+
+// MARK: CAN Reader
 void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomic<bool> &running) {
     while (running) {
         struct can_frame frame{};
@@ -266,7 +365,7 @@ int main() {
         return 1;
     }
 
-    int gnss_fd = open("/dev/ttyACM0", O_RDONLY | O_NOCTTY);
+    int gnss_fd = open("/dev/ttyACM0", O_RDWR | O_NOCTTY);
 
     // CAN0 reader thread
     std::thread can0_thread([&]() { readCAN(can0_fd, m, q, running); });
@@ -274,13 +373,8 @@ int main() {
     // CAN1 reader thread
     std::thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
 
-<<<<<<< HEAD
     // GNSS reader thread
     std::thread gnss_reader_thread([&]() { gnssReader(gnss_fd, m, q, running); });
-=======
-    //Open another GPS thread
-
->>>>>>> 655ff2cffca01a9d6d09681bac034a297db9ffc6
 
     // Sender loop
     std::cout << "Starting sender loop...\nPress Ctrl+C to quit\n";
