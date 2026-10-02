@@ -88,6 +88,9 @@ std::string getEnvVar(const char* name) {
     return std::string(value);
 }
 
+//MARK: GNSS Reader
+// gnssReader reads the corrected data from the chip.
+
 
 // ========== Main code ==========
 static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
@@ -267,6 +270,8 @@ int main() {
     std::thread can1_thread([&](){
         readCAN(can1_fd, m, q, running);
     });
+
+    //Open another GPS thread
 
 
     // Sender loop

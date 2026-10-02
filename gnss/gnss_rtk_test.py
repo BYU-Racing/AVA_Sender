@@ -1,6 +1,8 @@
 # Filename: gnss_rtk_test.py
 # Author:   Blake Hill
 
+#rewrite this one into C++. This guy runs on the raspberry pi. So we want to include in AVA Sender. 
+
 import threading
 
 from pyubx2 import (
