@@ -1,5 +1,5 @@
-#include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXNetSystem.h>
+#include <ixwebsocket/IXWebSocket.h>
 
 #include <linux/can.h>
 #include <linux/can/raw.h>
@@ -8,30 +8,30 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <iostream>
-#include <stdexcept>
-#include <cstdint>
-#include <cstdlib>
-#include <cstdio>
-#include <csignal>
-#include <cstring>
-#include <string>
 #include <atomic>
 #include <chrono>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
 #include <mutex>
 #include <queue>
-#include <thread>
-#include <iomanip>
 #include <sstream>
-#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <thread>
 
 // ========== Structs and Constants ==========
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
-const uint64_t RETRY_INTERVAL_MS = 1000; // 1 second interval between reconnect attempts
-const uint64_t RESEND_INTERVAL_MS = 50; // 50 ms interval between resending failed messages
-const uint16_t NUM_PACKET_RETRIES = 20; // Retries sending a packet this many times, then closes
+const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
+const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
+const uint16_t NUM_PACKET_RETRIES = 20;    // Retries sending a packet this many times, then closes
 
 /*  Data struct for sending CAN frame to server, packed to avoid padding.
     Struct for queued packet as well for retrying failed sends.
@@ -55,31 +55,28 @@ struct queued_packet {
     uint16_t retries;
 };
 
-
-// ========== Non-Constant Global Variables ==========
+// MARK: Non-Const Global Variables
 volatile std::sig_atomic_t stop_requested = 0;
 
-
-// ========== Helper Functions ==========
+// MARK: Helper Functions
 
 // Monotonic timestamp in ms (relative to start)
-static inline uint64_t getTimeNow64()
-{
+static inline uint64_t getTimeNow64() {
     using namespace std::chrono;
     return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 static uint32_t getTimeNow32() {
     using namespace std::chrono;
-    return static_cast<uint32_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+    return static_cast<uint32_t>(
+        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count()
+    );
 }
 
-void handleSignal(int) {
-    stop_requested = 1;
-}
+void handleSignal(int) { stop_requested = 1; }
 
-std::string getEnvVar(const char* name) {
-    const char* value = std::getenv(name);
+std::string getEnvVar(const char *name) {
+    const char *value = std::getenv(name);
 
     if (value == nullptr || *value == '\0') {
         throw std::runtime_error(std::string("Environment variable not set: ") + name);
@@ -88,55 +85,62 @@ std::string getEnvVar(const char* name) {
     return std::string(value);
 }
 
+// MARK: Main Code
+static_assert(
+    sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"
+); // Constantly checks that packet is the right size
 
-// ========== Main code ==========
-static_assert(sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"); // Constantly checks that packet is the right size
-
-// Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1 on failure.
-static int openCANSocket(const char* ifname){
+// Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1
+// on failure.
+static int openCANSocket(const char *ifname) {
     int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
-    if(s < 0){
+    if (s < 0) {
         perror("Problem opening CAN socket");
         return -1;
     }
 
-    struct ifreq ifr {};
+    struct ifreq ifr{};
     std::strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
-    if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) { perror("ioctl(SIOCGIFINDEX)"); close(s); return -1; }
+    if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
+        perror("ioctl(SIOCGIFINDEX)");
+        close(s);
+        return -1;
+    }
 
-    struct sockaddr_can addr {};
+    struct sockaddr_can addr{};
     addr.can_family = AF_CAN;
     addr.can_ifindex = ifr.ifr_ifindex;
 
-    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) { 
-        perror("bind(can)"); close(s); 
-        return -1; 
+    if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("bind(can)");
+        close(s);
+        return -1;
     }
     return s;
 }
 
-
 // Sets up websocket with URL and sets up message callback function
 void setupWebSocket(
-    ix::WebSocket& webSocket, const std::string& url, std::atomic<bool>& ws_open, 
-    std::atomic<bool>& was_connected, std::atomic<uint64_t>& reconnect_deadline,
-    std::atomic<uint64_t>& next_reconnect_attempt
-    ) {
-    
+    ix::WebSocket &webSocket, const std::string &url, std::atomic<bool> &ws_open,
+    std::atomic<bool> &was_connected, std::atomic<uint64_t> &reconnect_deadline,
+    std::atomic<uint64_t> &next_reconnect_attempt
+) {
+
     // Closes WS and sets reconnect_deadline
-    auto close_ws = [&]() {
-        ws_open = false;
-        if(was_connected && reconnect_deadline == 0){
-            reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
-            next_reconnect_attempt = getTimeNow64();
+    auto close_ws =
+        [&]() {
+            ws_open = false;
+            if (was_connected && reconnect_deadline == 0) {
+                reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
+                next_reconnect_attempt = getTimeNow64();
+            }
         }
-    }
 
     ix::initNetSystem();
 
     webSocket.setUrl(url);
-    webSocket.disableAutomaticReconnection(); 
-    webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr& msg) {
+    webSocket.disableAutomaticReconnection();
+    webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
         using Type = ix::WebSocketMessageType;
 
         if (msg->type == Type::Open) {
@@ -153,7 +157,7 @@ void setupWebSocket(
         } else if (msg->type == Type::Error) {
             close_ws();
             std::fprintf(stderr, "WS Error: %s\n", msg->errorInfo.reason);
-        } else if (msg->type == Type::Ping){
+        } else if (msg->type == Type::Ping) {
             std::printf("Received ping %s\n", msg->str);
         } else if (msg->type == Type::Pong) {
             std::printf("Received pong %s\n", msg->str);
@@ -161,22 +165,20 @@ void setupWebSocket(
     });
 }
 
-void readCAN(
-    int can_fd,
-    std::mutex& m, std::queue<queued_packet>& q, 
-    std::atomic<bool>& running
-    ) {
+void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomic<bool> &running) {
     while (running) {
-        struct can_frame frame {};
+        struct can_frame frame{};
         int n = read(can_fd, &frame, sizeof(frame));
         if (n < 0) {
-            if (!running) break;
+            if (!running)
+                break;
             perror("read(can)");
             continue;
         }
-        if (n != (int)sizeof(frame)) continue;
+        if (n != (int)sizeof(frame))
+            continue;
 
-        pi_to_server pkt {};
+        pi_to_server pkt{};
         pkt.timestamp = getTimeNow32();
 
         // Ignore error frames
@@ -187,19 +189,19 @@ void readCAN(
         // Extract raw CAN identifier (strip flags)
         uint32_t raw_id = 0;
         if (frame.can_id & CAN_EFF_FLAG) {
-            raw_id = (frame.can_id & CAN_EFF_MASK);   // 29-bit extended
+            raw_id = (frame.can_id & CAN_EFF_MASK); // 29-bit extended
         } else {
-            raw_id = (frame.can_id & CAN_SFF_MASK);   // 11-bit standard
+            raw_id = (frame.can_id & CAN_SFF_MASK); // 11-bit standard
         }
-
 
         pkt.id = raw_id;
 
         pkt.length = frame.can_dlc;
-        if (pkt.length > 8) pkt.length = 8;
+        if (pkt.length > 8)
+            pkt.length = 8;
         std::memcpy(pkt.bytes, frame.data, pkt.length);
 
-        queued_packet queued {};
+        queued_packet queued{};
         queued.pkt = pkt;
         queued.last_send_attempt = 0;
         queued.retries = 0;
@@ -211,15 +213,14 @@ void readCAN(
     }
 }
 
-
 int main() {
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
     std::string server_ip;
-    try{
+    try {
         server_ip = getEnvVar("AVA_SERVER_IP");
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         std::cerr << e.what() << "\n";
         return 1;
     }
@@ -231,63 +232,62 @@ int main() {
     std::atomic<bool> was_connected{false};
     std::atomic<uint64_t> reconnect_deadline{0};
     std::atomic<uint64_t> next_reconnect_attempt{0};
-    setupWebSocket(webSocket, url, ws_open, was_connected, reconnect_deadline, next_reconnect_attempt);
+    setupWebSocket(
+        webSocket, url, ws_open, was_connected, reconnect_deadline, next_reconnect_attempt
+    );
 
     // CAN queue
     std::mutex m;
     std::queue<queued_packet> q;
     std::atomic<bool> running{true}; // Atomic so that all threads can read it safely
 
-
     webSocket.start();
 
     // first reconnect attempt is RETRY_INTERVAL_MS after start
-    next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS; 
+    next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS;
 
     // open file desc for CAN0
     int can0_fd = openCANSocket("can0");
-    if(can0_fd < 0) {
+    if (can0_fd < 0) {
         std::perror("Failed to open CAN0 socket");
         return 1;
     }
 
     // open file desc for CAN1
     int can1_fd = openCANSocket("can1");
-    if(can1_fd < 0) {
+    if (can1_fd < 0) {
         std::perror("Failed to open CAN1 socket");
         return 1;
     }
 
+    int gnss_fd = open("/dev/ttyACM0", O_RDONLY | O_NOCTTY);
+
     // CAN0 reader thread
-    std::thread can0_thread([&](){
-        readCAN(can0_fd, m, q, running);
-    });
+    std::thread can0_thread([&]() { readCAN(can0_fd, m, q, running); });
 
     // CAN1 reader thread
-    std::thread can1_thread([&](){
-        readCAN(can1_fd, m, q, running);
-    });
+    std::thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
 
+    // GNSS reader thread
+    std::thread gnss_reader_thread([&]() { gnssReader(gnss_fd, m, q, running); });
 
     // Sender loop
     std::cout << "Starting sender loop...\nPress Ctrl+C to quit\n";
     while (!stop_requested) {
 
         // -- Reconnect logic --
-        if(!ws_open){
+        if (!ws_open) {
 
             // check if reconnect deadline has passed, close program if so
-            if(reconnect_deadline != 0 && 
-               getTimeNow64() >= reconnect_deadline) {
+            if (reconnect_deadline != 0 && getTimeNow64() >= reconnect_deadline) {
                 std::cout << "Websocket closed.\n";
                 break;
             }
 
             // Try to restart websocket if it's not open when next_reconnect_attempt has passed
-            if(next_reconnect_attempt != 0 && 
-               getTimeNow64() >= next_reconnect_attempt){
+            if (next_reconnect_attempt != 0 && getTimeNow64() >= next_reconnect_attempt) {
                 webSocket.stop();
-                webSocket.start(); 
+                webSocket.start();
                 next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS;
             }
 
@@ -296,22 +296,22 @@ int main() {
         }
 
         // Pop packet from queue for sending
-        queued_packet q_pkt {};
+        queued_packet q_pkt{};
         bool unlocked = false;
         {
             std::lock_guard<std::mutex> lock(m);
 
-            if (!q.empty()){ // if queue isn't empty, pop front pkt
+            if (!q.empty()) { // if queue isn't empty, pop front pkt
                 q_pkt = q.front();
                 uint64_t now = getTimeNow64();
-                if((q_pkt.last_send_attempt == 0) ||
+                if ((q_pkt.last_send_attempt == 0) ||
                     (now - q_pkt.last_send_attempt >= RESEND_INTERVAL_MS)) {
-                        q.front().last_send_attempt = now;
-                        unlocked = true;
-                    }
+                    q.front().last_send_attempt = now;
+                    unlocked = true;
+                }
             }
         }
-        if(!unlocked){ // if queue not ready, wait 10ms and try again
+        if (!unlocked) { // if queue not ready, wait 10ms and try again
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
@@ -321,15 +321,16 @@ int main() {
         std::memcpy(payload.data(), &q_pkt.pkt, sizeof(q_pkt.pkt));
 
         auto info = webSocket.sendBinary(payload);
-        if (info.success){ // If sent successfully, pop from queue
+        if (info.success) { // If sent successfully, pop from queue
             std::lock_guard<std::mutex> lock(m);
             if (!q.empty()) {
                 q.pop();
             }
         } else { // If failed to send, retry; if too many retries, reconnect
             std::lock_guard<std::mutex> lock(m);
-            if(q.front().retries++ >= NUM_PACKET_RETRIES){
-                std::cerr << "Failed to send packet after " << NUM_PACKET_RETRIES << " retries. Reconnecting.\n";
+            if (q.front().retries++ >= NUM_PACKET_RETRIES) {
+                std::cerr << "Failed to send packet after " << NUM_PACKET_RETRIES
+                          << " retries. Reconnecting.\n";
                 q.front().retries = 0;
                 q.front().last_send_attempt = 0;
                 ws_open = false;
@@ -339,7 +340,7 @@ int main() {
             std::cerr << "Failed to send packet\n";
         }
     }
-    
+
     // Cleanup
     running = false;
     shutdown(can0_fd, SHUT_RD);

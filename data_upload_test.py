@@ -155,8 +155,8 @@ def make_can_payload(msg_id: int) -> tuple[int, bytearray]:
             return 7, data
 
         case 9:  # GPS: longitude first, then latitude per DBC
-            lat_e7 = int((42 + random.uniform(-0.05, 0.05)) * 1e7)
-            lon_e7 = int((-105 + random.uniform(-0.05, 0.05)) * 1e7)
+            lat_e7 = int((40.2488 + random.uniform(-0.00005, 0.00005)) * 1e7)
+            lon_e7 = int((-111.6495 + random.uniform(-0.00005, 0.00005)) * 1e7)
             data[0:4] = i32(lon_e7)
             data[4:8] = i32(lat_e7)
             return 8, data

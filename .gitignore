@@ -8,3 +8,4 @@ Logs/
 *.csv
 
 .env
+livetests.zip
