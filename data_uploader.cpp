@@ -85,10 +85,16 @@ std::string getEnvVar(const char *name) {
     return std::string(value);
 }
 
+<<<<<<< HEAD
 // MARK: Main Code
 static_assert(
     sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"
 ); // Constantly checks that packet is the right size
+=======
+//MARK: GNSS Reader
+// gnssReader reads the corrected data from the chip.
+
+>>>>>>> 655ff2cffca01a9d6d09681bac034a297db9ffc6
 
 // Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1
 // on failure.
@@ -268,8 +274,13 @@ int main() {
     // CAN1 reader thread
     std::thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
 
+<<<<<<< HEAD
     // GNSS reader thread
     std::thread gnss_reader_thread([&]() { gnssReader(gnss_fd, m, q, running); });
+=======
+    //Open another GPS thread
+
+>>>>>>> 655ff2cffca01a9d6d09681bac034a297db9ffc6
 
     // Sender loop
     std::cout << "Starting sender loop...\nPress Ctrl+C to quit\n";
