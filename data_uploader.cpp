@@ -267,15 +267,28 @@ bool validateUbxChecksum(std::vector<std::uint8_t> frame, uint16_t length) {
     return (ck_a == CHECKSUM_A && ck_b == CHECKSUM_B);
 }
 
-// handleUbxMessage();
+void handleUbxMessage(std::vector<std::uint8_t> ubx_frame) {
+    uint8_t msg_class = ubx_frame[2];
+    uint8_t msg_id = ubx_frame[3];
+    if (uint16_t(msg_class << 8 | msg_id) == UBX_NAV_PVT) {
+        handleNavPvt(ubx_frame);
+    } else if (uint16_t(msg_class << 8 | msg_id) == UBX_RXM_RTCM) {
+        handleRxmRtcm(ubx_frame);
+    } else if (
+        uint16_t(msg_class << 8 | msg_id) == UBX_ACK_ACK ||
+        uint16_t(msg_class << 8 | msg_id) == UBX_ACK_NAK
+    ) {
+        handleAck(ubx_frame);
+    } else {
+        std::printf("Received unhandled UBX message: Class: %02X, ID: %02X\n", msg_class, msg_id);
+    }
+}
 
 // handleNavPvt();
 
-// handleNavSvin();
-
 // handleRxmRtcm();
 
-// static void handleAck();
+void handleAck() {}
 
 // MARK: Main Code
 static_assert(
