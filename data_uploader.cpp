@@ -307,9 +307,17 @@ void handleUbxMessage(std::vector<std::uint8_t> ubx_frame) {
 
 // handleNavPvt();
 
-// handleRxmRtcm();
-
 void handleAck(std::vector<std::uint8_t> ubx_frame) {}
+
+// handleNavSvin();
+
+bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame) {
+    // Need to check if the messae is use, get type, and check msg.crcFailed.
+    std::cout << "Received UBX-RXM-RTCM message of length: " << ubx_frame.size() << endl;
+    return true;
+}
+
+// static void handleAck();
 
 // MARK: Main Code
 static_assert(
