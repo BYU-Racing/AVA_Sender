@@ -218,10 +218,11 @@ static bool config_gnss(int gnss_fd) {
 bool tryExtractUbxFrame(
     boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame
 ) {
-    if (data_buf.empty() ||
-        data_buf.size() < CIRC_BUF_OVERHEAD) { // Minimum UBX frame size is 8 bytes
+    // Check that buf is not empty and has min UBX frame size (8 bytes)
+    if (data_buf.empty() || data_buf.size() < CIRC_BUF_OVERHEAD) {
         return false;
     }
+    // Go through buf until UBX frame start is found or buf is exhausted
     while (data_buf.size() >= CIRC_BUF_OVERHEAD) {
         if (data_buf[0] == UBX_BYTE_1 && data_buf[1] == UBX_BYTE_2) {
             break; // Found potential UBX frame start
@@ -229,6 +230,7 @@ bool tryExtractUbxFrame(
             data_buf.erase_begin(1); // Remove the first byte and continue searching
         }
     }
+    // Try to extract UBX frame if start bytes are found
     if ((data_buf[0] == UBX_BYTE_1) && (data_buf[1] == UBX_BYTE_2)) {
         uint16_t data_len = data_buf[4] | data_buf[5] << 8; // Length is little-endian
         size_t frame_len = data_len + CIRC_BUF_OVERHEAD;    // Total length of the UBX frame
