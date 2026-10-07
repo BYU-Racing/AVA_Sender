@@ -16,6 +16,7 @@ FetchContent_MakeAvailable(IXWebSocket)
 find_package(Boost REQUIRED)
 
 add_executable(ava_sender data_uploader.cpp)
+target_sources(ava_sender PRIVATE ublox_gnss.cpp)
 
 # Enable TLS in IX (uses OpenSSL on Linux by default when enabled)
 # (IX's CMake options are documented in their build docs.) 
