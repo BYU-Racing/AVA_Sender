@@ -1,11 +1,13 @@
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXWebSocket.h>
 
+#include <boost/circular_buffer.hpp>
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -15,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -23,15 +26,47 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+
 #include <thread>
 
-// ========== Structs and Constants ==========
+// MARK: Structs & Constants
+#define UBX_BYTE_1 0xB5
+#define UBX_BYTE_2 0x62
+#define CIRC_BUF_OVERHEAD 8
+#define CFG_PAYLOAD_SIZE 34
+
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
 const uint16_t NUM_PACKET_RETRIES = 20;    // Retries sending a packet this many times, then closes
+const size_t GNSS_BUF_SIZE = 1024;         // Buffer size for reading GNSS data
+
+// UBX message IDs, Class << 8 | ID
+constexpr uint16_t UBX_NAV_PVT = 0x0107;
+constexpr uint16_t UBX_RXM_RTCM = 0x0232;
+constexpr uint16_t UBX_ACK_ACK = 0x0501;
+constexpr uint16_t UBX_ACK_NAK = 0x0500;
+constexpr uint16_t UBX_CFG_VALSET = 0x068A;
+
+// MARK: CFG settings
+// RAM-only config
+constexpr uint32_t CFG_VALSET_HEADER = 0x00000100; // RAM only, no save to flash
+// Key IDs for CFG_VALSET
+constexpr uint32_t CFG_TMODE_MODE = 0x20030001;
+constexpr uint32_t CFG_USBINPROT_UBX = 0x10770001;
+constexpr uint32_t CFG_USBINPROT_RTCM3X = 0x10770004;
+constexpr uint32_t CFG_USBOUTPROT_UBX = 0x10780001;
+constexpr uint32_t CFG_MSGOUT_UBX_NAV_PVT_USB = 0x20910009;
+constexpr uint32_t CFG_MSGOUT_UBX_RXM_RTCM_USB = 0x2091026B;
+// Vals for each Key ID
+constexpr uint8_t CFG_TMODE_MODE_ROV = 0x00;
+constexpr uint8_t CFG_USBINPROT_UBX_EN = 0x01;
+constexpr uint8_t CFG_USBINPROT_RTCM3X_EN = 0x01;
+constexpr uint8_t CFG_USBOUTPROT_UBX_EN = 0x01;
+constexpr uint8_t CFG_MSGOUT_UBX_NAV_PVT_USB_EN = 0x01;
+constexpr uint8_t CFG_MSGOUT_UBX_RXM_RTCM_USB_EN = 0x01;
 
 /*  Data struct for sending CAN frame to server, packed to avoid padding.
     Struct for queued packet as well for retrying failed sends.
@@ -55,11 +90,10 @@ struct queued_packet {
     uint16_t retries;
 };
 
-// MARK: Non-Const Global Variables
+// Non-Const Global Variables
 volatile std::sig_atomic_t stop_requested = 0;
 
 // MARK: Helper Functions
-
 // Monotonic timestamp in ms (relative to start)
 static inline uint64_t getTimeNow64() {
     using namespace std::chrono;
@@ -85,16 +119,173 @@ std::string getEnvVar(const char *name) {
     return std::string(value);
 }
 
-<<<<<<< HEAD
+// MARK: GNSS Helper Functions
+static bool setupGnssFd(int gnss_fd) {
+    struct termios settings{};
+    int res = tcgetattr(gnss_fd, &settings);
+    if (res < 0) {
+        return false;
+    }
+    cfmakeraw(&settings);
+    settings.c_cflag &= ~(PARENB | CSTOPB | CSIZE | CRTSCTS);
+    settings.c_cflag |= CS8 | CLOCAL | CREAD;
+    settings.c_cc[VMIN] = 0;
+    settings.c_cc[VTIME] = 10;
+    res = cfsetispeed(&settings, B115200);
+    if (res < 0) {
+        return false;
+    }
+    res = cfsetospeed(&settings, B115200);
+    if (res < 0) {
+        return false;
+    }
+    res = tcsetattr(gnss_fd, TCSANOW, &settings);
+    if (res < 0) {
+        return false;
+    }
+    return true;
+}
+
+static void appendU32LE(std::vector<std::uint8_t> &vec, std::uint32_t value) {
+    vec.push_back(static_cast<std::uint8_t>(value & 0xFF));
+    vec.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+    vec.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFF));
+    vec.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFF));
+}
+
+static bool config_gnss(int gnss_fd) {
+    std::vector<std::uint8_t> payload;
+    payload.reserve(CFG_PAYLOAD_SIZE);
+
+    appendU32LE(payload, CFG_VALSET_HEADER);
+    appendU32LE(payload, CFG_TMODE_MODE);
+    payload.push_back(CFG_TMODE_MODE_ROV);
+    appendU32LE(payload, CFG_USBINPROT_UBX);
+    payload.push_back(CFG_USBINPROT_UBX_EN);
+    appendU32LE(payload, CFG_USBINPROT_RTCM3X);
+    payload.push_back(CFG_USBINPROT_RTCM3X_EN);
+    appendU32LE(payload, CFG_USBOUTPROT_UBX);
+    payload.push_back(CFG_USBOUTPROT_UBX_EN);
+    appendU32LE(payload, CFG_MSGOUT_UBX_NAV_PVT_USB);
+    payload.push_back(CFG_MSGOUT_UBX_NAV_PVT_USB_EN);
+    appendU32LE(payload, CFG_MSGOUT_UBX_RXM_RTCM_USB);
+    payload.push_back(CFG_MSGOUT_UBX_RXM_RTCM_USB_EN);
+    uint16_t payload_length = static_cast<uint16_t>(payload.size());
+
+    std::vector<std::uint8_t> cfg_valset_msg;
+    cfg_valset_msg.reserve(payload.size() + 8);
+
+    cfg_valset_msg.push_back(UBX_BYTE_1);
+    cfg_valset_msg.push_back(UBX_BYTE_2);
+    cfg_valset_msg.push_back((UBX_CFG_VALSET >> 8) & 0xFF);
+    cfg_valset_msg.push_back(UBX_CFG_VALSET & 0xFF);
+    cfg_valset_msg.push_back(payload_length & 0xFF);
+    cfg_valset_msg.push_back((payload_length >> 8) & 0xFF);
+    cfg_valset_msg.insert(cfg_valset_msg.end(), payload.begin(), payload.end());
+    uint8_t ck_a = 0;
+    uint8_t ck_b = 0;
+    for (size_t i = 2; i < cfg_valset_msg.size(); i++) {
+        ck_a += cfg_valset_msg[i];
+        ck_b += ck_a;
+    }
+    cfg_valset_msg.push_back(ck_a);
+    cfg_valset_msg.push_back(ck_b);
+
+    size_t msg_size = cfg_valset_msg.size();
+    size_t bytes_written = 0;
+    while (bytes_written < msg_size) {
+        ssize_t res =
+            write(gnss_fd, cfg_valset_msg.data() + bytes_written, msg_size - bytes_written);
+        if (res < 0) {
+            if (errno == EINTR) {
+                continue; // Interrupted by signal, retry writing
+            }
+            perror("write(config_gnss)");
+            return false;
+        } else if (res == 0) {
+            perror("write(config_gnss): wrote 0 bytes");
+            return false; // No more bytes can be written
+        }
+        bytes_written += res;
+    }
+    return true;
+}
+
+// static readSerialData();
+
+// processReceiveBuffer();
+
+bool tryExtractUbxFrame(
+    boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame
+) {
+    // Check that buf is not empty and has min UBX frame size (8 bytes)
+    if (data_buf.empty() || data_buf.size() < CIRC_BUF_OVERHEAD) {
+        return false;
+    }
+    // Go through buf until UBX frame start is found or buf is exhausted
+    while (data_buf.size() >= CIRC_BUF_OVERHEAD) {
+        if (data_buf[0] == UBX_BYTE_1 && data_buf[1] == UBX_BYTE_2) {
+            break; // Found potential UBX frame start
+        } else {
+            data_buf.erase_begin(1); // Remove the first byte and continue searching
+        }
+    }
+    // Try to extract UBX frame if start bytes are found
+    if ((data_buf[0] == UBX_BYTE_1) && (data_buf[1] == UBX_BYTE_2)) {
+        uint16_t data_len = data_buf[4] | data_buf[5] << 8; // Length is little-endian
+        size_t frame_len = data_len + CIRC_BUF_OVERHEAD;    // Total length of the UBX frame
+        if (data_buf.size() < frame_len) {
+            return false;
+        } else {
+            std::vector<std::uint8_t> frame(data_buf.begin(), data_buf.begin() + frame_len);
+            if (!validateUbxChecksum(frame, data_len)) {
+                data_buf.erase_begin(1);
+                perror("Invalid UBX checksum");
+                return false;
+            }
+            if (data_buf.size() < frame_len) {
+                perror("Not enough data for full UBX frame");
+                return false;
+            }
+            ubx_frame = frame;
+            data_buf.erase_begin(frame_len);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool validateUbxChecksum(std::vector<std::uint8_t> frame, uint16_t length) {
+    uint8_t CHECKSUM_A = frame[6 + length];
+    uint8_t CHECKSUM_B = frame[7 + length];
+    uint8_t ck_a = 0;
+    uint8_t ck_b = 0;
+    for (size_t i = 2; i < length + 6; i++) {
+        ck_a += frame[i];
+        ck_b += ck_a;
+    }
+    return (ck_a == CHECKSUM_A && ck_b == CHECKSUM_B);
+}
+
+// handleUbxMessage();
+
+// handleNavPvt();
+
+// handleNavSvin();
+
+ bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame) {
+    //Need to check if the messae is use, get type, and check msg.crcFailed.
+    std::cout << "Received UBX-RXM-RTCM message of length: " << ubx_frame.size() << endl;
+    return true;
+ 
+ }
+
+// static void handleAck();
+
 // MARK: Main Code
 static_assert(
     sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"
 ); // Constantly checks that packet is the right size
-=======
-//MARK: GNSS Reader
-// gnssReader reads the corrected data from the chip.
-
->>>>>>> 655ff2cffca01a9d6d09681bac034a297db9ffc6
 
 // Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1
 // on failure.
@@ -133,14 +324,13 @@ void setupWebSocket(
 ) {
 
     // Closes WS and sets reconnect_deadline
-    auto close_ws =
-        [&]() {
-            ws_open = false;
-            if (was_connected && reconnect_deadline == 0) {
-                reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
-                next_reconnect_attempt = getTimeNow64();
-            }
+    auto close_ws = [&]() {
+        ws_open = false;
+        if (was_connected && reconnect_deadline == 0) {
+            reconnect_deadline = getTimeNow64() + RECONNECT_DELAY_MS;
+            next_reconnect_attempt = getTimeNow64();
         }
+    };
 
     ix::initNetSystem();
 
@@ -156,7 +346,7 @@ void setupWebSocket(
             next_reconnect_attempt = 0;
             std::cout << "Connected to WS" << "\n";
         } else if (msg->type == Type::Message) {
-            std::printf("Received text msg: %s\n", msg->str);
+            std::printf("Received text msg: %s\n", (msg->str).c_str());
         } else if (msg->type == Type::Close) {
             close_ws();
             std::printf("Close signal received\n");
@@ -164,13 +354,52 @@ void setupWebSocket(
             close_ws();
             std::fprintf(stderr, "WS Error: %s\n", msg->errorInfo.reason);
         } else if (msg->type == Type::Ping) {
-            std::printf("Received ping %s\n", msg->str);
+            std::printf("Received ping %s\n", (msg->str).c_str());
         } else if (msg->type == Type::Pong) {
-            std::printf("Received pong %s\n", msg->str);
+            std::printf("Received pong %s\n", (msg->str).c_str());
         }
     });
 }
 
+// MARK: GNSS Reader
+void gnssReader(
+    int gnss_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomic<bool> &running
+) {
+    if (!config_gnss(gnss_fd)) {
+        std::perror("Failed to configure GNSS socket");
+        return;
+    }
+
+    boost::circular_buffer<std::uint8_t> data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
+    std::vector<std::uint8_t> ubx_frame;                          // Vector for extracted UBX frame
+
+    while (running) {
+        uint16_t freespace = data_buf.capacity() - data_buf.size();
+        if (freespace == 0) {
+            continue; // Buffer is full, wait for processing
+        }
+        ssize_t bytes_read = read(gnss_fd, data_buf.data(), freespace);
+        if (bytes_read > 0) { // Process the received GNSS data
+            if (tryExtractUbxFrame(data_buf, ubx_frame)) {
+                // Process the extracted UBX frame
+                handleUbxMessage(ubx_frame);
+            }
+        } else if (bytes_read == 0) { // Read no bytes
+            continue;
+        } else if (bytes_read < 0) { // Error reading from GNSS device
+            if (errno == EINTR) {
+                continue; // Interrupted by signal, retry reading
+            } else {
+                if (!running)
+                    break;
+                perror("read(gnss)");
+                continue;
+            }
+        }
+    }
+}
+
+// MARK: CAN Reader
 void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomic<bool> &running) {
     while (running) {
         struct can_frame frame{};
@@ -266,7 +495,15 @@ int main() {
         return 1;
     }
 
-    int gnss_fd = open("/dev/ttyACM0", O_RDONLY | O_NOCTTY);
+    int gnss_fd = open("/dev/ttyACM0", O_RDWR | O_NOCTTY);
+    if (gnss_fd < 0) {
+        std::perror("Failed to open GNSS socket");
+        return 1;
+    }
+    if (!setupGnssFd(gnss_fd)) {
+        std::perror("Failed to setup GNSS socket");
+        return 1;
+    }
 
     // CAN0 reader thread
     std::thread can0_thread([&]() { readCAN(can0_fd, m, q, running); });
@@ -274,13 +511,8 @@ int main() {
     // CAN1 reader thread
     std::thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
 
-<<<<<<< HEAD
     // GNSS reader thread
     std::thread gnss_reader_thread([&]() { gnssReader(gnss_fd, m, q, running); });
-=======
-    //Open another GPS thread
-
->>>>>>> 655ff2cffca01a9d6d09681bac034a297db9ffc6
 
     // Sender loop
     std::cout << "Starting sender loop...\nPress Ctrl+C to quit\n";
@@ -358,8 +590,10 @@ int main() {
     shutdown(can1_fd, SHUT_RD);
     close(can0_fd);
     close(can1_fd);
+    close(gnss_fd);
     can0_thread.join();
     can1_thread.join();
+    gnss_reader_thread.join();
     webSocket.stop();
     ix::uninitNetSystem();
 
