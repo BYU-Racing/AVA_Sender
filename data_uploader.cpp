@@ -41,7 +41,7 @@ const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to rec
 const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
 const uint16_t NUM_PACKET_RETRIES = 20;    // Retries sending a packet this many times, then closes
-const size_t GNSS_BUF_SIZE = 1024;         // Buffer size for reading GNSS data
+const size_t GNSS_BUF_SIZE = 2048;         // Buffer size for reading GNSS data
 
 // UBX message IDs, Class << 8 | ID
 constexpr uint16_t UBX_NAV_PVT = 0x0107;
@@ -215,6 +215,27 @@ static bool config_gnss(int gnss_fd) {
 
 // processReceiveBuffer();
 
+// Writes RTK corrections from Base Station
+void writeRTKCorrections(int gnss_fd, std::vector<std::uint8_t> rtk_corrections) {
+    int bytes_written = 0;
+    while (bytes_written < rtk_corrections.size()) {
+        int res = write(
+            gnss_fd, rtk_corrections.data() + bytes_written, rtk_corrections.size() - bytes_written
+        );
+        if (res < 0) {
+            if (errno == EINTR) {
+                continue; // Interrupted by signal, retry writing
+            }
+            perror("write(rtk_corrections)");
+            return;
+        } else if (res == 0) {
+            perror("write(rtk_corrections): wrote 0 bytes");
+            return; // No more bytes can be written
+        }
+        bytes_written += res;
+    }
+}
+
 bool tryExtractUbxFrame(
     boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame
 ) {
@@ -288,7 +309,7 @@ void handleUbxMessage(std::vector<std::uint8_t> ubx_frame) {
 
 // handleRxmRtcm();
 
-void handleAck() {}
+void handleAck(std::vector<std::uint8_t> ubx_frame) {}
 
 // MARK: Main Code
 static_assert(
@@ -330,7 +351,6 @@ void setupWebSocket(
     std::atomic<bool> &was_connected, std::atomic<uint64_t> &reconnect_deadline,
     std::atomic<uint64_t> &next_reconnect_attempt
 ) {
-
     // Closes WS and sets reconnect_deadline
     auto close_ws = [&]() {
         ws_open = false;
@@ -371,7 +391,8 @@ void setupWebSocket(
 
 // MARK: GNSS Reader
 void gnssReader(
-    int gnss_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomic<bool> &running
+    int gnss_fd, const std::string &base_station_url, std::mutex &m, std::queue<queued_packet> &q,
+    std::atomic<bool> &running
 ) {
     if (!config_gnss(gnss_fd)) {
         std::perror("Failed to configure GNSS socket");
@@ -380,6 +401,24 @@ void gnssReader(
 
     boost::circular_buffer<std::uint8_t> data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
     std::vector<std::uint8_t> ubx_frame;                          // Vector for extracted UBX frame
+
+    ix::WebSocket bsWebSocket;
+    bsWebSocket.setUrl(base_station_url);
+    bsWebSocket.enableAutomaticReconnection();
+    bsWebSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
+        using Type = ix::WebSocketMessageType;
+
+        if (msg->type == Type::Open) {
+            std::cout << "Connected to Base Station WS" << "\n";
+        } else if (msg->type == Type::Message) {
+            std::vector<std::uint8_t> rtk_corrections(msg->str.begin(), msg->str.end());
+            writeRTKCorrections(gnss_fd, rtk_corrections);
+        } else if (msg->type == Type::Close) {
+            std::printf("Base Station WS closed\n");
+        } else if (msg->type == Type::Error) {
+            std::fprintf(stderr, "Base Station WS Error: %s\n", msg->errorInfo.reason);
+        }
+    });
 
     while (running) {
         uint16_t freespace = data_buf.capacity() - data_buf.size();
@@ -461,13 +500,16 @@ int main() {
     std::signal(SIGTERM, handleSignal);
 
     std::string server_ip;
+    std::string base_station_ip;
     try {
         server_ip = getEnvVar("AVA_SERVER_IP");
+        base_station_ip = getEnvVar("AVA_BASE_STATION_IP");
     } catch (const std::exception &e) {
         std::cerr << e.what() << "\n";
         return 1;
     }
     const std::string url = url_prefix + server_ip + url_suffix;
+    const std::string base_station_url = url_prefix + base_station_ip + url_suffix;
 
     // Websocket setup
     ix::WebSocket webSocket;
@@ -520,7 +562,7 @@ int main() {
     std::thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
 
     // GNSS reader thread
-    std::thread gnss_reader_thread([&]() { gnssReader(gnss_fd, m, q, running); });
+    std::thread gnss_reader_thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
 
     // Sender loop
     std::cout << "Starting sender loop...\nPress Ctrl+C to quit\n";
