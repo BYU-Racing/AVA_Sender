@@ -201,6 +201,7 @@ void gnssReader(
     }
 
     boost::circular_buffer<uint8_t> data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
+    std::vector<uint8_t> read_buf(GNSS_BUF_SIZE);            // Buffer for reading GNSS data
     std::vector<uint8_t> ubx_frame;                          // Vector for extracted UBX frame
 
     ix::WebSocket bsWebSocket;
@@ -226,8 +227,9 @@ void gnssReader(
         if (freespace == 0) {
             continue; // Buffer is full, wait for processing
         }
-        ssize_t bytes_read = read(gnss_fd, data_buf.data(), freespace);
+        ssize_t bytes_read = read(gnss_fd, read_buf.data(), freespace);
         if (bytes_read > 0) { // Process the received GNSS data
+            data_buf.insert(data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read);
             if (tryExtractUbxFrame(data_buf, ubx_frame)) {
                 // Process the extracted UBX frame
                 handleUbxMessage(ubx_frame);
