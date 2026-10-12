@@ -5,7 +5,14 @@
 #include <cstdint>
 #include <vector>
 
-// MARK: MSG IDs
+// MARK: Constants
+#define UBX_BYTE_1 0xB5
+#define UBX_BYTE_2 0x62
+#define CIRC_BUF_OVERHEAD_SIZE 8
+#define CIRC_BUF_HEADER_SIZE 6
+#define CFG_PAYLOAD_SIZE 34
+
+// MSG IDs
 // UBX message IDs, Class << 8 | ID
 constexpr uint16_t UBX_NAV_PVT = 0x0107;
 constexpr uint16_t UBX_RXM_RTCM = 0x0232;
@@ -13,7 +20,7 @@ constexpr uint16_t UBX_ACK_ACK = 0x0501;
 constexpr uint16_t UBX_ACK_NAK = 0x0500;
 constexpr uint16_t UBX_CFG_VALSET = 0x068A;
 
-// MARK: GNSS CFG
+// GNSS CFG
 // RAM-only config
 constexpr uint32_t CFG_VALSET_HEADER = 0x00000100; // RAM only, no save to flash
 // Key IDs for CFG_VALSET
@@ -31,7 +38,7 @@ constexpr uint8_t CFG_USBOUTPROT_UBX_EN = 0x01;
 constexpr uint8_t CFG_MSGOUT_UBX_NAV_PVT_USB_EN = 0x01;
 constexpr uint8_t CFG_MSGOUT_UBX_RXM_RTCM_USB_EN = 0x01;
 
-// MARK: Func Decs
+// MARK: Func Desc's
 // ======== Helper funcs ========
 
 // Puts each byte of 32-bit value into vec

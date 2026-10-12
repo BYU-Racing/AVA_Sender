@@ -48,13 +48,9 @@ using std::size_t;
 using std::thread;
 
 // MARK: Structs/Consts
-#define UBX_BYTE_1 0xB5
-#define UBX_BYTE_2 0x62
-#define CIRC_BUF_OVERHEAD 8
-#define CFG_PAYLOAD_SIZE 34
-
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
+const std::string bs_url_suffix = ":8080/rtk";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
@@ -217,6 +213,8 @@ void gnssReader(
         if (msg->type == Type::Open) {
             printf("Connected to Base Station WS\n");
         } else if (msg->type == Type::Message) {
+            if (!running || !msg->binary || msg->str.empty())
+                return;
             std::vector<uint8_t> rtk_corrections(msg->str.begin(), msg->str.end());
             writeRTKCorrections(gnss_fd, rtk_corrections);
         } else if (msg->type == Type::Close) {
@@ -266,6 +264,7 @@ void gnssReader(
             }
         }
     }
+    bsWebSocket.stop();
 }
 
 // MARK: CAN Reader
@@ -332,7 +331,7 @@ int main() {
         return 1;
     }
     const std::string url = url_prefix + server_ip + url_suffix;
-    const std::string base_station_url = url_prefix + base_station_ip + url_suffix;
+    const std::string base_station_url = url_prefix + base_station_ip + bs_url_suffix;
 
     // Websocket setup
     ix::WebSocket webSocket;
@@ -386,7 +385,7 @@ int main() {
     thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
 
     // GNSS reader thread
-    thread gnss_reader_thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
+    thread gnss_thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
 
     // MARK: Sender Loop
     printf("Starting sender loop...\nPress Ctrl+C to quit\n");
@@ -408,7 +407,7 @@ int main() {
                 next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS;
             }
 
-            std::this_thread::sleep_for(chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
 
@@ -429,7 +428,7 @@ int main() {
             }
         }
         if (!unlocked) { // if queue not ready, wait 10ms and try again
-            std::this_thread::sleep_for(chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
@@ -464,12 +463,12 @@ int main() {
     running = false;
     shutdown(can0_fd, SHUT_RD);
     shutdown(can1_fd, SHUT_RD);
+    can0_thread.join();
+    can1_thread.join();
+    gnss_thread.join();
     close(can0_fd);
     close(can1_fd);
     close(gnss_fd);
-    can0_thread.join();
-    can1_thread.join();
-    gnss_reader_thread.join();
     webSocket.stop();
     ix::uninitNetSystem();
 

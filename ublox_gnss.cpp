@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <cstdio>
+#include <utility>
 
 #include <termios.h>
 #include <unistd.h>
@@ -140,44 +141,46 @@ void writeRTKCorrections(int gnss_fd, std::vector<std::uint8_t> rtk_corrections)
 bool tryExtractUbxFrame(
     boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame
 ) {
-    // Check that buf is not empty and has min UBX frame size (8 bytes)
-    if (data_buf.empty() || data_buf.size() < CIRC_BUF_OVERHEAD) {
-        return false;
-    }
-    // Go through buf until UBX frame start is found or buf is exhausted
-    while (data_buf.size() >= CIRC_BUF_OVERHEAD) {
-        if (data_buf[0] == UBX_BYTE_1 && data_buf[1] == UBX_BYTE_2) {
-            break; // Found potential UBX frame start
-        } else {
+    for (;;) {
+        // Go through buf until UBX frame start is found or buf is exhausted
+        while (data_buf.size() >= 2 && (data_buf[0] != UBX_BYTE_1 || data_buf[1] != UBX_BYTE_2)) {
             data_buf.erase_begin(1); // Remove the first byte and continue searching
         }
-    }
-    // Try to extract UBX frame if start bytes are found
-    if ((data_buf[0] == UBX_BYTE_1) && (data_buf[1] == UBX_BYTE_2)) {
-        uint16_t data_len = data_buf[4] | data_buf[5] << 8; // Length is little-endian
-        size_t frame_len = data_len + CIRC_BUF_OVERHEAD;    // Total length of the UBX frame
-        if (data_buf.size() < frame_len) {
+
+        // Not enough space for packet
+        if (data_buf.size() < CIRC_BUF_OVERHEAD_SIZE) {
             return false;
-        } else {
-            std::vector<std::uint8_t> frame(data_buf.begin(), data_buf.begin() + frame_len);
-            if (!validateUbxChecksum(frame, data_len)) {
-                data_buf.erase_begin(1);
-                perror("Invalid UBX checksum");
-                return false;
-            }
-            if (data_buf.size() < frame_len) {
-                perror("Not enough data for full UBX frame");
-                return false;
-            }
-            ubx_frame = frame;
-            data_buf.erase_begin(frame_len);
-            return true;
         }
+
+        // Try to extract UBX frame if start bytes are found
+        uint16_t data_len = data_buf[4] | data_buf[5] << 8;   // Length is little-endian
+        size_t frame_len = data_len + CIRC_BUF_OVERHEAD_SIZE; // Total length of the UBX frame
+        if (frame_len > data_buf.capacity()) {
+            data_buf.erase_begin(1);
+            continue;
+        }
+        if (data_buf.size() < frame_len) {
+            fprintf(stderr, "Incomplete frame");
+            return false;
+        }
+
+        std::vector<std::uint8_t> frame(data_buf.begin(), data_buf.begin() + frame_len);
+
+        if (!validateUbxChecksum(frame, data_len)) {
+            data_buf.erase_begin(1);
+            fprintf(stderr, "UBX checksum not valid");
+            continue;
+        }
+
+        ubx_frame = std::move(frame);
+        data_buf.erase_begin(frame_len);
+        return true;
     }
-    return false;
 }
 
+// MARK: Msg Handlrs
 void handleUbxMessage(std::vector<std::uint8_t> &ubx_frame) {
+
     uint8_t msg_class = ubx_frame[2];
     uint8_t msg_id = ubx_frame[3];
     if (uint16_t(msg_class << 8 | msg_id) == UBX_NAV_PVT) {
