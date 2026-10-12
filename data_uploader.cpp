@@ -42,6 +42,7 @@ using std::int64_t;
 using std::int8_t;
 
 using std::atomic;
+using std::chrono;
 using std::fprintf;
 using std::printf;
 using std::size_t;
@@ -89,12 +90,10 @@ volatile std::sig_atomic_t stop_requested = 0;
 // MARK: Helper Funcs
 // Monotonic timestamp in ms (relative to start)
 static inline uint64_t getTimeNow64() {
-    using namespace std::chrono;
     return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 static uint32_t getTimeNow32() {
-    using namespace std::chrono;
     return static_cast<uint32_t>(
         duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count()
     );
@@ -112,7 +111,7 @@ std::string getEnvVar(const char *name) {
     return std::string(value);
 }
 
-// MARK: Main Code
+// MARK: Main Code ***
 static_assert(
     sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"
 ); // Constantly checks that packet is the right size
@@ -146,6 +145,7 @@ static int openCANSocket(const char *ifname) {
     return s;
 }
 
+// MARK: Setup WS
 // Sets up websocket with URL and sets up message callback function
 void setupWebSocket(
     ix::WebSocket &webSocket, const std::string &url, atomic<bool> &ws_open,
@@ -191,6 +191,8 @@ void setupWebSocket(
 }
 
 // MARK: GNSS Reader
+// Reads data from GNSS module, gives it to handlers
+// Also opens WS for reading RTK corrections and writes those corrections to GNSS module
 void gnssReader(
     int gnss_fd, const std::string &base_station_url, std::mutex &m, std::queue<queued_packet> &q,
     atomic<bool> &running
@@ -200,11 +202,12 @@ void gnssReader(
         return;
     }
 
-    boost::circular_buffer<uint8_t> data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
-    std::vector<uint8_t> read_buf(GNSS_BUF_SIZE);            // Buffer for reading GNSS data
-    std::vector<uint8_t> ubx_frame;                          // Vector for extracted UBX frame
+    boost::circular_buffer<uint8_t> gnss_data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
+    std::vector<uint8_t> read_buf(GNSS_BUF_SIZE);                 // Buffer for reading GNSS data
+    std::vector<uint8_t> ubx_frame;                               // Vector for extracted UBX frame
+    ix::WebSocket bsWebSocket;                                    // Websocket to base station
 
-    ix::WebSocket bsWebSocket;
+    // Configure Base Station Websocket
     bsWebSocket.setUrl(base_station_url);
     bsWebSocket.enableAutomaticReconnection();
     bsWebSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
@@ -221,16 +224,22 @@ void gnssReader(
             fprintf(stderr, "Base Station WS Error: %s\n", msg->errorInfo.reason);
         }
     });
+    bsWebSocket.start();
 
+    // Loop to read from GNSS Module and do stuff with data
     while (running) {
-        uint16_t freespace = data_buf.capacity() - data_buf.size();
+        size_t freespace = GNSS_BUF_SIZE - gnss_data_buf.size();
         if (freespace == 0) {
             continue; // Buffer is full, wait for processing
         }
         ssize_t bytes_read = read(gnss_fd, read_buf.data(), freespace);
-        if (bytes_read > 0) { // Process the received GNSS data
-            data_buf.insert(data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read);
-            if (tryExtractUbxFrame(data_buf, ubx_frame)) {
+        // Process the received GNSS data
+        if (bytes_read > 0) {
+            // Moves data from read_buf to ring buffer and handles it
+            gnss_data_buf.insert(
+                gnss_data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read
+            );
+            if (tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
                 // Process the extracted UBX frame
                 handleUbxMessage(ubx_frame);
             }
@@ -298,7 +307,7 @@ void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<boo
     }
 }
 
-// MARK: Main Function
+// MARK: Main Func ***
 int main() {
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
@@ -389,7 +398,7 @@ int main() {
                 next_reconnect_attempt = getTimeNow64() + RETRY_INTERVAL_MS;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(chrono::milliseconds(50));
             continue;
         }
 
@@ -410,7 +419,7 @@ int main() {
             }
         }
         if (!unlocked) { // if queue not ready, wait 10ms and try again
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(chrono::milliseconds(10));
             continue;
         }
 
