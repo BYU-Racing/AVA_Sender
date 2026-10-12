@@ -42,7 +42,6 @@ using std::int64_t;
 using std::int8_t;
 
 using std::atomic;
-using std::chrono;
 using std::fprintf;
 using std::printf;
 using std::size_t;
@@ -90,10 +89,12 @@ volatile std::sig_atomic_t stop_requested = 0;
 // MARK: Helper Funcs
 // Monotonic timestamp in ms (relative to start)
 static inline uint64_t getTimeNow64() {
+    using namespace std::chrono;
     return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 static uint32_t getTimeNow32() {
+    using namespace std::chrono;
     return static_cast<uint32_t>(
         duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count()
     );
@@ -228,10 +229,21 @@ void gnssReader(
 
     // Loop to read from GNSS Module and do stuff with data
     while (running) {
+        while (running && tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
+            // Process the extracted UBX frame
+            handleUbxMessage(ubx_frame);
+        }
+
+        if (!running) {
+            break;
+        }
+
         size_t freespace = GNSS_BUF_SIZE - gnss_data_buf.size();
         if (freespace == 0) {
+            gnss_data_buf.erase_begin(1);
             continue; // Buffer is full, wait for processing
         }
+
         ssize_t bytes_read = read(gnss_fd, read_buf.data(), freespace);
         // Process the received GNSS data
         if (bytes_read > 0) {
@@ -239,11 +251,9 @@ void gnssReader(
             gnss_data_buf.insert(
                 gnss_data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read
             );
-            if (tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
-                // Process the extracted UBX frame
-                handleUbxMessage(ubx_frame);
-            }
-        } else if (bytes_read == 0) { // Read no bytes
+        }
+
+        if (bytes_read == 0) { // Read no bytes
             continue;
         } else if (bytes_read < 0) { // Error reading from GNSS device
             if (errno == EINTR) {
