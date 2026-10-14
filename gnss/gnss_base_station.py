@@ -23,7 +23,7 @@ ws_ip = "localhost"
 
 def get_ws_ip():
     load_dotenv()
-    return os.environ["ROVER_IP", "192.168.0.1"]
+    return os.environ["ROVER_IP"]
 
 
 # Configure the F9P for survey-in mode to find base station location
