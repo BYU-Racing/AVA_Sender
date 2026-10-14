@@ -227,8 +227,8 @@ void gnssReader(
 
     // Loop to read from GNSS Module and do stuff with data
     while (running) {
+        // Handle all UBX frames currently in buffer
         while (running && tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
-            // Process the extracted UBX frame
             handleUbxMessage(ubx_frame);
         }
 
@@ -242,16 +242,13 @@ void gnssReader(
             continue; // Buffer is full, wait for processing
         }
 
+        // Read bytes into read_buf
         ssize_t bytes_read = read(gnss_fd, read_buf.data(), freespace);
-        // Process the received GNSS data
-        if (bytes_read > 0) {
-            // Moves data from read_buf to ring buffer and handles it
+        if (bytes_read > 0) { // Moves data from into ring buffer for handling
             gnss_data_buf.insert(
                 gnss_data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read
             );
-        }
-
-        if (bytes_read == 0) { // Read no bytes
+        } else if (bytes_read == 0) { // Read no bytes
             continue;
         } else if (bytes_read < 0) { // Error reading from GNSS device
             if (errno == EINTR) {
