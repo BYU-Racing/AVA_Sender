@@ -139,7 +139,7 @@ def main() -> None:
         print("Closing WS")
         stop_event.set()
         # reader_thread.join(timeout=2)
-        ser.close()
+        # ser.close()
 
 
 if __name__ == "__main__":
