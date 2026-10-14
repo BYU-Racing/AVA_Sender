@@ -19,7 +19,7 @@ baud = 115200
 
 WS_PREFIX = "ws://"
 WS_SUFFIX = ":8080/rtk"
-ws_ip = "localhost"
+ws_ip = "100.121.126.33"
 ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
 ser = Serial(port, baud, timeout=1)
