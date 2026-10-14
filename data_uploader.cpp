@@ -46,11 +46,12 @@ using std::fprintf;
 using std::printf;
 using std::size_t;
 using std::thread;
+/* NAMESPACE END */
 
 // MARK: Structs/Consts
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
-const std::string bs_url_suffix = ":8080/rtk";
+const std::string bs_url_suffix = ":8081/rtk";
 const std::string GNSS_DEV = "/dev/ttyACM0";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
@@ -79,11 +80,15 @@ struct queued_packet {
     uint64_t last_send_attempt;
     uint16_t retries;
 };
+/* STRUCTS/CONSTS END */
 
-// Non-Const Global Variables
+/* Non-Const Global Variables */
 volatile std::sig_atomic_t stop_requested = 0;
+bool gnss_on = False;
+/* NON-CONST GLOBALS END */
 
-// MARK: Helper Funcs
+/* MARK: Helper Funcs
+ */
 // Monotonic timestamp in ms (relative to start)
 static inline uint64_t getTimeNow64() {
     using namespace std::chrono;
@@ -108,6 +113,7 @@ std::string getEnvVar(const char *name) {
 
     return std::string(value);
 }
+/* HELPER FUNCS END */
 
 // MARK: Main Code ***
 static_assert(
@@ -325,7 +331,7 @@ int main() {
     std::string base_station_ip;
     try {
         server_ip = getEnvVar("AVA_SERVER_IP");
-        base_station_ip = getEnvVar("AVA_BASE_STATION_IP");
+        base_station_ip = getEnvVar("BASE_STATION_IP");
     } catch (const std::exception &e) {
         std::cerr << e.what() << "\n";
         return 1;
@@ -368,14 +374,16 @@ int main() {
         return 1;
     }
 
-    int gnss_fd = open(GNSS_DEV, O_RDWR | O_NOCTTY);
-    if (gnss_fd < 0) {
-        std::perror("Failed to open GNSS socket");
-        return 1;
-    }
-    if (!setupGnssFd(gnss_fd)) {
-        std::perror("Failed to setup GNSS socket");
-        return 1;
+    if (gnss_on) {
+        int gnss_fd = open(GNSS_DEV, O_RDWR | O_NOCTTY);
+        if (gnss_fd < 0) {
+            std::perror("Failed to open GNSS socket");
+            return 1;
+        }
+        if (!setupGnssFd(gnss_fd)) {
+            std::perror("Failed to setup GNSS socket");
+            return 1;
+        }
     }
 
     // CAN0 reader thread
@@ -386,6 +394,7 @@ int main() {
 
     // GNSS reader thread
     thread gnss_thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
+    /* FDS & THREADS END */
 
     // MARK: Sender Loop
     printf("Starting sender loop...\nPress Ctrl+C to quit\n");
@@ -465,10 +474,12 @@ int main() {
     shutdown(can1_fd, SHUT_RD);
     can0_thread.join();
     can1_thread.join();
-    gnss_thread.join();
+    if (gnss_on) {
+        gnss_thread.join();
+        close(gnss_fd);
+    }
     close(can0_fd);
     close(can1_fd);
-    close(gnss_fd);
     webSocket.stop();
     ix::uninitNetSystem();
 

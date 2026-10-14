@@ -3,8 +3,10 @@
 
 # rewrite this one into C++. This guy runs on the raspberry pi. So we want to include in AVA Sender.
 
+import os
 import threading
 
+from dotenv import load_dotenv
 from pyubx2 import (
     SET_LAYER_RAM,
     TXN_NONE,
@@ -20,14 +22,18 @@ port = "/dev/ttyACM0"
 baud = 115200
 
 WS_PREFIX = "ws://"
-WS_SUFFIX = ":8080/rtk"
+WS_SUFFIX = ":8081/rtk"
 ws_ip = "localhost"
-ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
 ser = Serial(port, baud, timeout=1)
 ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
 
 stop_event = threading.Event()
+
+
+def get_ws_ip():
+    load_dotenv()
+    return os.environ["BASE_STATION_IP", "192.168.0.1"]
 
 
 def config_ubx():
@@ -105,6 +111,10 @@ def main() -> None:
         target=read_from_ubx, args=(ubx, stop_event), daemon=True
     )
     reader_thread.start()
+
+    ws_ip = get_ws_ip()
+    ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
+
     try:
         while not stop_event.is_set():
             try:

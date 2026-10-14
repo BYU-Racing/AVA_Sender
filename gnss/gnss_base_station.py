@@ -2,8 +2,10 @@
 # Author:   Blake Hill
 
 
+import os
 import time
 
+from dotenv import load_dotenv
 from pyubx2 import (
     RTCM3_PROTOCOL,
     SET_LAYER_RAM,
@@ -25,13 +27,13 @@ ser = Serial(port, baud, timeout=1)
 ubx = UBXReader(ser, protfilter=RTCM3_PROTOCOL | UBX_PROTOCOL)
 
 WS_PREFIX = "ws://"
-WS_SUFFIX = ":8080/rtk"
+WS_SUFFIX = ":8081/rtk"
 ws_ip = "localhost"
-ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
 
-def retry_connect():
-    pass
+def get_ws_ip():
+    load_dotenv()
+    return os.environ["ROVER_IP", "192.168.0.1"]
 
 
 # Configure the F9P for survey-in mode to find base station location
@@ -94,6 +96,9 @@ def main():
 
     while not check_survey_in():
         pass
+
+    ws_ip = get_ws_ip()
+    ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
     while True:
         try:
