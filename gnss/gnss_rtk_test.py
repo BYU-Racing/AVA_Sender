@@ -1,6 +1,7 @@
 # Filename: gnss_rtk_test.py
 # Author:   Blake Hill
 
+import argparse
 import threading
 
 from pyubx2 import (
@@ -11,7 +12,7 @@ from pyubx2 import (
     UBXReader,
 )
 from serial import Serial
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.sync.client import connect
 
 port = "/dev/ttyACM0"
@@ -22,26 +23,7 @@ WS_SUFFIX = ":8080/rtk"
 ws_ip = "100.121.126.33"
 ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
-ser = Serial(port, baud, timeout=1)
-ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
-
-stop_event = threading.Event()
-
-import time
-
-from websockets.exceptions import InvalidHandshake
-
-
-def connect_when_ready(url):
-    while True:
-        try:
-            return connect(url)
-        except (OSError, InvalidHandshake) as err:
-            print(f"Waiting for relay at {url}: {err}", flush=True)
-            time.sleep(2)
-
-
-def config_ubx():
+def config_ubx(ser):
     config = [
         # Set normal mode
         ("CFG_TMODE_MODE", 0),
@@ -111,15 +93,25 @@ def read_from_ubx(ubx: UBXReader, stop_event: threading.Event) -> None:
 
 
 def main() -> None:
-    config_ubx()
+    parser = argparse.ArgumentParser(description="Receive base-station RTK corrections")
+    parser.add_argument("--ws-url", default=ws_url, help="Base station WebSocket URL")
+    parser.add_argument("--port", default=port, help="Rover receiver serial port")
+    parser.add_argument("--baud", type=int, default=baud)
+    args = parser.parse_args()
+
+    ser = Serial(args.port, args.baud, timeout=1)
+    ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
+    stop_event = threading.Event()
     reader_thread = threading.Thread(
         target=read_from_ubx, args=(ubx, stop_event), daemon=True
     )
-    reader_thread.start()
     try:
+        config_ubx(ser)
+        reader_thread.start()
         while not stop_event.is_set():
             try:
-                with connect_when_ready(ws_url) as ws:
+                # Connect directly to the base, including over its Tailscale IP.
+                with connect(args.ws_url, proxy=None) as ws:
                     print("Connected to Base Station WS")
                     for data in ws:
                         if stop_event.is_set():
@@ -133,8 +125,10 @@ def main() -> None:
 
             except ConnectionClosed as err:
                 print(f"WS Disconnected: {err}")
+            except InvalidHandshake as err:
+                print(f"Base station handshake rejected at {args.ws_url}: {err}")
             except OSError as err:
-                print(f"Couldn't connect: {err}")
+                print(f"Waiting for base station at {args.ws_url}: {err}")
 
             if not stop_event.is_set():
                 print("Reconnecting to WS in 1s")
@@ -143,7 +137,8 @@ def main() -> None:
     finally:
         print("Closing WS")
         stop_event.set()
-        reader_thread.join(timeout=2)
+        if reader_thread.ident is not None:
+            reader_thread.join(timeout=2)
         ser.close()
 
 
@@ -151,5 +146,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        stop_event.set()
         print("\nStopped by Ctrl+C")

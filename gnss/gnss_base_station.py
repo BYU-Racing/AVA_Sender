@@ -35,9 +35,10 @@ class RTKServer:
             return connection.respond(HTTPStatus.NOT_FOUND, "Use /rtk\n")
 
     def handle_rover(self, ws):
+        address = ws.remote_address
         with self.lock:
             self.clients.add(ws)
-        print(f"Rover connected: {ws.remote_address}", flush=True)
+        print(f"Rover connected: {address}", flush=True)
         try:
             # Receiving keeps the handler alive and detects disconnects.
             # Corrections are sent by broadcast() from the serial reader.
@@ -48,7 +49,7 @@ class RTKServer:
         finally:
             with self.lock:
                 self.clients.discard(ws)
-            print(f"Rover disconnected: {ws.remote_address}", flush=True)
+            print(f"Rover disconnected: {address}", flush=True)
 
     def broadcast(self, raw):
         with self.lock:
