@@ -106,11 +106,11 @@ def read_from_ubx(ubx: UBXReader, stop_event: threading.Event) -> None:
 
 
 def main() -> None:
-    config_ubx()
-    reader_thread = threading.Thread(
-        target=read_from_ubx, args=(ubx, stop_event), daemon=True
-    )
-    reader_thread.start()
+    # config_ubx()
+    # reader_thread = threading.Thread(
+    #     target=read_from_ubx, args=(ubx, stop_event), daemon=True
+    # )
+    # reader_thread.start()
 
     ws_ip = get_ws_ip()
     ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
@@ -128,7 +128,7 @@ def main() -> None:
                             print("Ignoring non-binary WS msg")
                             continue
 
-                        ser.write(data)
+                        # ser.write(data)
 
             except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake) as err:
                 print(f"WS not connected: {err}", flush=True)
@@ -140,7 +140,7 @@ def main() -> None:
     finally:
         print("Closing WS")
         stop_event.set()
-        reader_thread.join(timeout=2)
+        # reader_thread.join(timeout=2)
         ser.close()
 
 

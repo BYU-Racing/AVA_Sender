@@ -13,7 +13,6 @@ from pyubx2 import (
     UBX_PROTOCOL,
     UBXMessage,
     UBXReader,
-    protocol,
 )
 from serial import Serial
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
@@ -92,10 +91,10 @@ def check_survey_in() -> bool:
 
 # Main Code starts
 def main():
-    start_survey_in()
+    # start_survey_in()
 
-    while not check_survey_in():
-        pass
+    # while not check_survey_in():
+    #     pass
 
     ws_ip = get_ws_ip()
     ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
@@ -105,18 +104,19 @@ def main():
             with connect(ws_url) as ws:
                 print(f"Connected to WS at {ws_url}", flush=True)
                 while True:  # Main loop
-                    raw, msg = ubx.read()
+                    continue
+                    # raw, msg = ubx.read()
 
-                    if msg is None:
-                        print("No GNSS message received (read timeout)", flush=True)
-                        continue
+                    # if msg is None:
+                    #     print("No GNSS message received (read timeout)", flush=True)
+                    #     continue
 
-                    if protocol(raw) == RTCM3_PROTOCOL:
-                        ws.send(raw)
-                        print(
-                            f"RTCM3 sent: {msg.identity}, length: {len(raw)} bytes",
-                            flush=True,
-                        )
+                    # if protocol(raw) == RTCM3_PROTOCOL:
+                    #     ws.send(raw)
+                    #     print(
+                    #         f"RTCM3 sent: {msg.identity}, length: {len(raw)} bytes",
+                    #         flush=True,
+                    #     )
         except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake) as err:
             print(f"WS not connected: {err}", flush=True)
 
