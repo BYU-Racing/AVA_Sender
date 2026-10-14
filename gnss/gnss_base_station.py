@@ -6,11 +6,6 @@ import os
 import time
 
 from dotenv import load_dotenv
-from pyubx2 import (
-    SET_LAYER_RAM,
-    TXN_NONE,
-    UBXMessage,
-)
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.sync.client import connect
 
@@ -32,57 +27,57 @@ def get_ws_ip():
 
 
 # Configure the F9P for survey-in mode to find base station location
-def start_survey_in():
-    config = [
-        # Set survey-in (Base Station) mode on
-        ("CFG_TMODE_MODE", 1),
-        # UBX and RTCM3 protocol over USB
-        ("CFG_USBOUTPROT_UBX", 1),  # Enable UBX protocol over USB
-        ("CFG_USBOUTPROT_RTCM3X", 1),  # Enable RTCM3 protocol over USB
-        # Survey Status output to USB
-        ("CFG_MSGOUT_UBX_NAV_SVIN_USB", 1),  # Enable NAV-SVIN message output
-        # Survey-in mode configuration
-        ## Quick test, 60 50000. Temp testing, 300 20000. Longer-term 18000 10000.
-        ("CFG_TMODE_SVIN_MIN_DUR", 300),  # Minimum survey-in duration (seconds)
-        ("CFG_TMODE_SVIN_ACC_LIMIT", 20000),  # Accuracy limit, 5m (0.1 mm units)
-        # Output RTCM3 messages over USB
-        ("CFG_MSGOUT_RTCM_3X_TYPE1005_USB", 1),
-        ("CFG_MSGOUT_RTCM_3X_TYPE1074_USB", 1),  # GPS MSM4
-        ("CFG_MSGOUT_RTCM_3X_TYPE1084_USB", 1),  # GLONASS MSM4
-        ("CFG_MSGOUT_RTCM_3X_TYPE1094_USB", 1),  # Galileo MSM4
-        ("CFG_MSGOUT_RTCM_3X_TYPE1124_USB", 1),  # BeiDou MSM4
-        ("CFG_MSGOUT_RTCM_3X_TYPE1230_USB", 1),  # GLONASS code-phase biases
-    ]
+# def start_survey_in():
+#     config = [
+#         # Set survey-in (Base Station) mode on
+#         ("CFG_TMODE_MODE", 1),
+#         # UBX and RTCM3 protocol over USB
+#         ("CFG_USBOUTPROT_UBX", 1),  # Enable UBX protocol over USB
+#         ("CFG_USBOUTPROT_RTCM3X", 1),  # Enable RTCM3 protocol over USB
+#         # Survey Status output to USB
+#         ("CFG_MSGOUT_UBX_NAV_SVIN_USB", 1),  # Enable NAV-SVIN message output
+#         # Survey-in mode configuration
+#         ## Quick test, 60 50000. Temp testing, 300 20000. Longer-term 18000 10000.
+#         ("CFG_TMODE_SVIN_MIN_DUR", 300),  # Minimum survey-in duration (seconds)
+#         ("CFG_TMODE_SVIN_ACC_LIMIT", 20000),  # Accuracy limit, 5m (0.1 mm units)
+#         # Output RTCM3 messages over USB
+#         ("CFG_MSGOUT_RTCM_3X_TYPE1005_USB", 1),
+#         ("CFG_MSGOUT_RTCM_3X_TYPE1074_USB", 1),  # GPS MSM4
+#         ("CFG_MSGOUT_RTCM_3X_TYPE1084_USB", 1),  # GLONASS MSM4
+#         ("CFG_MSGOUT_RTCM_3X_TYPE1094_USB", 1),  # Galileo MSM4
+#         ("CFG_MSGOUT_RTCM_3X_TYPE1124_USB", 1),  # BeiDou MSM4
+#         ("CFG_MSGOUT_RTCM_3X_TYPE1230_USB", 1),  # GLONASS code-phase biases
+#     ]
 
-    command = UBXMessage.config_set(SET_LAYER_RAM, TXN_NONE, config)
-    ser.write(command.serialize())
-    ser.flush()
+#     command = UBXMessage.config_set(SET_LAYER_RAM, TXN_NONE, config)
+#     ser.write(command.serialize())
+#     ser.flush()
 
 
-# Check NAV-SVIN message to see if survey-in is complete
-def check_survey_in() -> bool:
-    raw, msg = ubx.read()
+# # Check NAV-SVIN message to see if survey-in is complete
+# def check_survey_in() -> bool:
+#     raw, msg = ubx.read()
 
-    if msg is None:
-        print("No GNSS message received (read timeout)", flush=True)
+#     if msg is None:
+#         print("No GNSS message received (read timeout)", flush=True)
 
-    elif msg.identity in ("ACK-ACK", "ACK-NAK"):
-        print(msg, flush=True)
+#     elif msg.identity in ("ACK-ACK", "ACK-NAK"):
+#         print(msg, flush=True)
 
-    elif msg.identity == "NAV-SVIN":
-        print(
-            f"NAV-SVIN: Dur: {msg.dur}s, Est. Acc: {msg.meanAcc / 10000:.3f}m, "
-            f"Num Observations: {msg.obs}, Active: {msg.active}, Valid: {msg.valid}"
-        )
+#     elif msg.identity == "NAV-SVIN":
+#         print(
+#             f"NAV-SVIN: Dur: {msg.dur}s, Est. Acc: {msg.meanAcc / 10000:.3f}m, "
+#             f"Num Observations: {msg.obs}, Active: {msg.active}, Valid: {msg.valid}"
+#         )
 
-        if msg.valid == 1 and msg.active == 0:
-            print(
-                f"Survey-in complete in {msg.dur}s, "
-                f"Mean Position: Lat {msg.meanXHP}, Lon {msg.meanYHP}, Alt {msg.meanZHP}"
-            )
-            return True
+#         if msg.valid == 1 and msg.active == 0:
+#             print(
+#                 f"Survey-in complete in {msg.dur}s, "
+#                 f"Mean Position: Lat {msg.meanXHP}, Lon {msg.meanYHP}, Alt {msg.meanZHP}"
+#             )
+#             return True
 
-    return False
+#     return False
 
 
 # Main Code starts
@@ -124,5 +119,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        ser.close()
+        # ser.close()
         print("\nStopped by Ctrl+C", flush=True)
