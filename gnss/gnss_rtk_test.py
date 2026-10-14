@@ -25,7 +25,7 @@ stop_event = threading.Event()
 
 def get_ws_ip():
     load_dotenv()
-    return os.environ["BASE_STATION_IP", "192.168.0.1"]
+    return os.environ["BASE_STATION_IP"]
 
 
 # def config_ubx():
