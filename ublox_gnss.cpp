@@ -204,5 +204,32 @@ void handleAck(std::vector<std::uint8_t> &ubx_frame) {}
 bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame) {
     // Need to check if the message is used, get type, and check msg.crcFailed.
     std::printf("Received UBX-RXM-RTCM message of length: %uz\n", ubx_frame.size());
-    return true;
+
+    //First, check if the message is used.
+    //First, actually, let's get the flags byte out.
+
+    uint8_t flags = ubx_frame[7];
+    //shift right to get rid of crcFailed bit, initially the LSB.
+    //Now, check if the message is used.
+    const uint8_t crcFailed = flags & 0x01; //If zero, passed CRC check, if 1, failed
+    const uint8_t msgUsed = (flags >> 1) & 0x03; // 0 = unknown, 1 = unused, 2 = used
+
+    //Checking for crcFailed first.
+    if(crcFailed) { //Fails when true
+        std::cout << "UBX-RXM-RTCM message failed CRC check" << std::endl;
+        return false;
+    }
+
+    
+    //Checking for msgUsed state.
+    if(msgUsed == 0) {
+        std::cout << "UBX-RXM-RTCM msgUsed in unknown state" << std::endl;
+        return false;
+    } else if(msgUsed == 1) {
+        std::cout << "UBX-RXM-RTCM msgUsed in unused state" << std::endl;
+        return false;
+    } else if(msgUsed == 2) {
+        std::cout << "UBX-RXM-RTCM msgUsed in used state" << std::endl;
+    }
+    return false;
 }
