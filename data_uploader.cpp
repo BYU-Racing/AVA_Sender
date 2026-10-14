@@ -51,6 +51,7 @@ using std::thread;
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
 const std::string bs_url_suffix = ":8080/rtk";
+const std::string GNSS_DEV = "/dev/ttyACM0";
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
@@ -178,7 +179,7 @@ void setupWebSocket(
             printf("Close signal received\n");
         } else if (msg->type == Type::Error) {
             close_ws();
-            fprintf(stderr, "WS Error: %s\n", msg->errorInfo.reason);
+            fprintf(stderr, "WS Error: %s\n", msg->errorInfo.reason.c_str());
         } else if (msg->type == Type::Ping) {
             printf("Received ping %s\n", (msg->str).c_str());
         } else if (msg->type == Type::Pong) {
@@ -207,6 +208,8 @@ void gnssReader(
     // Configure Base Station Websocket
     bsWebSocket.setUrl(base_station_url);
     bsWebSocket.enableAutomaticReconnection();
+    bsWebSocket.setMinWaitBetweenReconnectionRetries(1000);
+    bsWebSocket.setMaxWaitBetweenReconnectionRetries(10000);
     bsWebSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
         using Type = ix::WebSocketMessageType;
 
@@ -365,7 +368,7 @@ int main() {
         return 1;
     }
 
-    int gnss_fd = open("/dev/ttyACM0", O_RDWR | O_NOCTTY);
+    int gnss_fd = open(GNSS_DEV, O_RDWR | O_NOCTTY);
     if (gnss_fd < 0) {
         std::perror("Failed to open GNSS socket");
         return 1;

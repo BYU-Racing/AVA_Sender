@@ -1,7 +1,7 @@
 # Filename: gnss_rtk_test.py
 # Author:   Blake Hill
 
-#rewrite this one into C++. This guy runs on the raspberry pi. So we want to include in AVA Sender. 
+# rewrite this one into C++. This guy runs on the raspberry pi. So we want to include in AVA Sender.
 
 import threading
 
@@ -13,7 +13,7 @@ from pyubx2 import (
     UBXReader,
 )
 from serial import Serial
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.sync.client import connect
 
 port = "/dev/ttyACM0"
@@ -108,7 +108,7 @@ def main() -> None:
     try:
         while not stop_event.is_set():
             try:
-                with connect(ws_url) as ws:
+                with connect(ws_url, open_timeout=5, close_timeout=2) as ws:
                     print("Connected to Base Station WS")
                     for data in ws:
                         if stop_event.is_set():
@@ -120,10 +120,8 @@ def main() -> None:
 
                         ser.write(data)
 
-            except ConnectionClosed as err:
-                print(f"WS Disconnected: {err}")
-            except OSError as err:
-                print(f"Couldn't connect: {err}")
+            except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake) as err:
+                print(f"WS not connected: {err}", flush=True)
 
             if not stop_event.is_set():
                 print("Reconnecting to WS in 1s")

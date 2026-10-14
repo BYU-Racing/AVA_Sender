@@ -1,6 +1,9 @@
 # Filename: gnss_base_station.py
 # Author:   Blake Hill
 
+
+import time
+
 from pyubx2 import (
     RTCM3_PROTOCOL,
     SET_LAYER_RAM,
@@ -11,6 +14,7 @@ from pyubx2 import (
     protocol,
 )
 from serial import Serial
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.sync.client import connect
 
 # port = "/dev/ttyACM0" # Linux
@@ -24,6 +28,10 @@ WS_PREFIX = "ws://"
 WS_SUFFIX = ":8080/rtk"
 ws_ip = "localhost"
 ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
+
+
+def retry_connect():
+    pass
 
 
 # Configure the F9P for survey-in mode to find base station location
@@ -81,23 +89,39 @@ def check_survey_in() -> bool:
 
 
 # Main Code starts
-start_survey_in()
+def main():
+    start_survey_in()
 
-while not check_survey_in():
-    pass
+    while not check_survey_in():
+        pass
 
-with connect(ws_url) as ws:
-    print(f"Connected to WS at {ws_url}", flush=True)
-    while True:  # Main loop
-        raw, msg = ubx.read()
+    while True:
+        try:
+            with connect(ws_url) as ws:
+                print(f"Connected to WS at {ws_url}", flush=True)
+                while True:  # Main loop
+                    raw, msg = ubx.read()
 
-        if msg is None:
-            print("No GNSS message received (read timeout)", flush=True)
-            continue
+                    if msg is None:
+                        print("No GNSS message received (read timeout)", flush=True)
+                        continue
 
-        if protocol(raw) == RTCM3_PROTOCOL:
-            ws.send(raw)
-            print(
-                f"RTCM3 sent: {msg.identity}, length: {len(raw)} bytes",
-                flush=True,
-            )
+                    if protocol(raw) == RTCM3_PROTOCOL:
+                        ws.send(raw)
+                        print(
+                            f"RTCM3 sent: {msg.identity}, length: {len(raw)} bytes",
+                            flush=True,
+                        )
+        except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake) as err:
+            print(f"WS not connected: {err}", flush=True)
+
+        print("Reconnecting", flush=True)
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        ser.close()
+        print("\nStopped by Ctrl+C", flush=True)
