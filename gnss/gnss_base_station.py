@@ -7,14 +7,10 @@ import time
 
 from dotenv import load_dotenv
 from pyubx2 import (
-    RTCM3_PROTOCOL,
     SET_LAYER_RAM,
     TXN_NONE,
-    UBX_PROTOCOL,
     UBXMessage,
-    UBXReader,
 )
-from serial import Serial
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.sync.client import connect
 
@@ -22,8 +18,8 @@ from websockets.sync.client import connect
 port = "COM5"  # Windows
 baud = 115200
 
-ser = Serial(port, baud, timeout=1)
-ubx = UBXReader(ser, protfilter=RTCM3_PROTOCOL | UBX_PROTOCOL)
+# ser = Serial(port, baud, timeout=1)
+# ubx = UBXReader(ser, protfilter=RTCM3_PROTOCOL | UBX_PROTOCOL)
 
 WS_PREFIX = "ws://"
 WS_SUFFIX = ":8081/rtk"

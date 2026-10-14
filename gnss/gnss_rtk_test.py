@@ -10,11 +10,9 @@ from dotenv import load_dotenv
 from pyubx2 import (
     SET_LAYER_RAM,
     TXN_NONE,
-    UBX_PROTOCOL,
     UBXMessage,
     UBXReader,
 )
-from serial import Serial
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.sync.client import connect
 
@@ -25,8 +23,8 @@ WS_PREFIX = "ws://"
 WS_SUFFIX = ":8081/rtk"
 ws_ip = "localhost"
 
-ser = Serial(port, baud, timeout=1)
-ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
+# ser = Serial(port, baud, timeout=1)
+# ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
 
 stop_event = threading.Event()
 
