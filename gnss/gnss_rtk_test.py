@@ -27,6 +27,19 @@ ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
 
 stop_event = threading.Event()
 
+import time
+
+from websockets.exceptions import InvalidHandshake
+
+
+def connect_when_ready(url):
+    while True:
+        try:
+            return connect(url)
+        except (OSError, InvalidHandshake) as err:
+            print(f"Waiting for relay at {url}: {err}", flush=True)
+            time.sleep(2)
+
 
 def config_ubx():
     config = [
@@ -106,7 +119,7 @@ def main() -> None:
     try:
         while not stop_event.is_set():
             try:
-                with connect(ws_url) as ws:
+                with connect_when_ready(ws_url) as ws:
                     print("Connected to Base Station WS")
                     for data in ws:
                         if stop_event.is_set():

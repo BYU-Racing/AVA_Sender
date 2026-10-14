@@ -25,6 +25,19 @@ WS_SUFFIX = ":8080/rtk"
 ws_ip = "localhost"
 ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
+import time
+
+from websockets.exceptions import InvalidHandshake
+
+
+def connect_when_ready(url):
+    while True:
+        try:
+            return connect(url)
+        except (OSError, InvalidHandshake) as err:
+            print(f"Waiting for relay at {url}: {err}", flush=True)
+            time.sleep(2)
+
 
 # Configure the F9P for survey-in mode to find base station location
 def start_survey_in():
@@ -86,7 +99,7 @@ start_survey_in()
 while not check_survey_in():
     pass
 
-with connect(ws_url) as ws:
+with connect_when_ready(ws_url) as ws:
     print(f"Connected to WS at {ws_url}", flush=True)
     while True:  # Main loop
         raw, msg = ubx.read()
