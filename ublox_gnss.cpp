@@ -7,6 +7,71 @@
 
 #include "ublox_gnss.h"
 
+
+// MARK: UBX Constants
+
+constexpr uint8_t UBX_CLASS_NAV = 0x01;
+constexpr uint8_t UBX_ID_PVT = 0x07;
+
+constexpr uint16_t UBX_NAV_PVT =
+    (static_cast<uint16_t>(UBX_CLASS_NAV) << 8) |
+    static_cast<uint16_t>(UBX_ID_PVT);
+
+constexpr std::size_t UBX_HEADER_SIZE = 6;
+constexpr std::size_t UBX_CHECKSUM_SIZE = 2;
+constexpr std::size_t UBX_FRAME_OVERHEAD =
+    UBX_HEADER_SIZE + UBX_CHECKSUM_SIZE;
+
+// MARK: NAV-PVT Constants
+
+constexpr std::size_t NAV_PVT_PAYLOAD_SIZE = 92;
+
+// Offsets within the NAV-PVT payload
+constexpr std::size_t PVT_FLAGS3_OFFSET = 78;
+constexpr std::size_t PVT_FIX_TYPE_OFFSET = 20;
+constexpr std::size_t PVT_FLAGS_OFFSET = 21;
+constexpr std::size_t PVT_NUM_SATELLITES_OFFSET = 23;
+constexpr std::size_t PVT_LONGITUDE_OFFSET = 24;
+constexpr std::size_t PVT_LATITUDE_OFFSET = 28;
+constexpr std::size_t PVT_HEIGHT_MSL_OFFSET = 36;
+constexpr std::size_t PVT_HORIZONTAL_ACCURACY_OFFSET = 40;
+constexpr std::size_t PVT_GROUND_SPEED_OFFSET = 60;
+constexpr std::size_t PVT_HEADING_OFFSET = 64;
+
+// Validity flags
+constexpr uint8_t PVT_INVALID_LLH_MASK = 0x01;
+
+// Navigation flags
+constexpr uint8_t PVT_GNSS_FIX_OK_MASK = 0x01;
+constexpr uint8_t PVT_DIFFERENTIAL_SOLUTION_MASK = 0x02;
+
+// RTK carrier-solution flags
+constexpr uint8_t PVT_CARRIER_SOLUTION_MASK = 0xC0;
+constexpr unsigned PVT_CARRIER_SOLUTION_SHIFT = 6;
+
+// Conversion factors
+constexpr double PVT_COORDINATE_SCALE = 0.0000001;
+constexpr double PVT_MILLIMETERS_TO_METERS = 0.001;
+constexpr double PVT_HEADING_SCALE = 0.00001;
+
+// NAV-PVT fix types
+enum class PVT_FixType : uint8_t {
+    NO_FIX = 0,
+    DEAD_RECKONING = 1,
+    FIX_2D = 2,
+    FIX_3D = 3,
+    GNSS_DEAD_RECKONING = 4,
+    TIME_ONLY = 5
+};
+
+// NAV-PVT RTK statuses
+enum class PVT_CarrierSolution : uint8_t {
+    NO_RTK = 0,
+    RTK_FLOAT = 1,
+    RTK_FIXED = 2
+};
+
+
 // MARK: Help Funcs
 
 static void appendU32LE(std::vector<uint8_t> &vec, std::uint32_t value) {
@@ -26,6 +91,22 @@ static bool validateUbxChecksum(std::vector<std::uint8_t> frame, std::uint16_t l
         ck_b += ck_a;
     }
     return (ck_a == CHECKSUM_A && ck_b == CHECKSUM_B);
+}
+
+static std::uint16_t readUInt16LE(const std::uint8_t* data) {
+    return static_cast<std::uint16_t>(data[0]) |
+           (static_cast<std::uint16_t>(data[1]) << 8);
+}
+
+static std::uint32_t readUInt32LE(const std::uint8_t* data) {
+    return static_cast<std::uint32_t>(data[0]) |
+           (static_cast<std::uint32_t>(data[1]) << 8) |
+           (static_cast<std::uint32_t>(data[2]) << 16) |
+           (static_cast<std::uint32_t>(data[3]) << 24);
+}
+
+static std::int32_t readInt32LE(const std::uint8_t* data) {
+    return static_cast<std::int32_t>(readUInt32LE(data));
 }
 
 // MARK: User Funcs
@@ -196,8 +277,82 @@ void handleUbxMessage(std::vector<std::uint8_t> &ubx_frame) {
         std::printf("Received unhandled UBX message: Class: %02X, ID: %02X\n", msg_class, msg_id);
     }
 }
+// MARK: NAV PVT
+void handleNavPvt(const std::vector<std::uint8_t>& ubx_frame) {
+    if (ubx_frame.size() < UBX_FRAME_OVERHEAD) {
+        return;
+    }
 
-// handleNavPvt();
+    const std::uint16_t payload_length =
+        readUInt16LE(ubx_frame.data() + UBX_PAYLOAD_LENGTH_OFFSET);
+
+    // NAV-PVT has a 92-byte payload. The input is a complete UBX frame.
+    if (payload_length != NAV_PVT_PAYLOAD_SIZE ||
+        ubx_frame.size() != UBX_FRAME_OVERHEAD + payload_length) {
+        std::fprintf(stderr, "Invalid NAV-PVT frame length\n");
+        return;
+    }
+
+    const std::uint8_t* payload = ubx_frame.data() + UBX_HEADER_SIZE;
+
+    const double longitude =
+        readInt32LE(payload + PVT_LONGITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const double latitude =
+        readInt32LE(payload + PVT_LATITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const double elevation =
+        readInt32LE(payload + PVT_HEIGHT_MSL_OFFSET) * PVT_MILLIMETERS_TO_METERS;
+    const double horizontal_accuracy =
+        readUInt32LE(payload + PVT_HORIZONTAL_ACCURACY_OFFSET) *
+        PVT_MILLIMETERS_TO_METERS;
+    const double speed =
+        readInt32LE(payload + PVT_GROUND_SPEED_OFFSET) *
+        PVT_MILLIMETERS_TO_METERS;
+    const double heading =
+        readInt32LE(payload + PVT_HEADING_OFFSET) * PVT_HEADING_SCALE;
+
+    const std::uint8_t flags = payload[PVT_FLAGS_OFFSET];
+    const std::uint8_t fix_type = payload[PVT_FIX_TYPE_OFFSET];
+    const std::uint8_t satellites = payload[PVT_NUM_SATELLITES_OFFSET];
+
+    const bool gnss_fix_ok = (flags & PVT_GNSS_FIX_OK_MASK) != 0;
+    const bool differential_solution =
+        (flags & PVT_DIFFERENTIAL_SOLUTION_MASK) != 0;
+    const bool position_valid =
+        (payload[PVT_FLAGS3_OFFSET] & PVT_INVALID_LLH_MASK) == 0;
+
+    const auto carrier_solution = static_cast<PVT_CarrierSolution>(
+        (flags & PVT_CARRIER_SOLUTION_MASK) >>
+        PVT_CARRIER_SOLUTION_SHIFT
+    );
+
+    const char* rtk_status = "Unknown";
+    switch (carrier_solution) {
+        case PVT_CarrierSolution::NO_RTK:    rtk_status = "No RTK"; break;
+        case PVT_CarrierSolution::RTK_FLOAT: rtk_status = "RTK float"; break;
+        case PVT_CarrierSolution::RTK_FIXED: rtk_status = "RTK fixed"; break;
+        default: break;
+    }
+
+    std::printf(
+        "%s | DiffCorrections: %s | FixOK: %s | Fix Type: %u | NumSat: %u\n",
+        rtk_status,
+        differential_solution ? "true" : "false",
+        gnss_fix_ok ? "true" : "false",
+        static_cast<unsigned>(fix_type),
+        static_cast<unsigned>(satellites)
+    );
+
+    if (position_valid) {
+        std::printf(
+            "Lat: %.7f | Lon: %.7f | Acc: %.3f m | Elev: %.3f m\n",
+            latitude, longitude, horizontal_accuracy, elevation
+        );
+    } else {
+        std::printf("Pos Invalid\n");
+    }
+
+    std::printf("Speed: %.3f m/s | Heading: %.5f deg\n\n", speed, heading);
+}
 
 void handleAck(std::vector<std::uint8_t> &ubx_frame) {}
 
