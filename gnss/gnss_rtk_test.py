@@ -98,11 +98,11 @@ def read_from_ubx(ubx: UBXReader, stop_event: threading.Event) -> None:
                 2: "Used successfully",
             }
             usage = rtcm_usage.get(msg.msgUsed, f"Unknown ({msg.msgUsed})")
-            print(
-                f"RTCM recv from read: type={msg.msgType}, "
-                f"used={usage}, CRC fail?={bool(msg.crcFailed)}",
-                flush=True,
-            )
+            # print(
+            #     f"RTCM recv from read: type={msg.msgType}, "
+            #     f"used={usage}, CRC fail?={bool(msg.crcFailed)}",
+            #     flush=True,
+            # )
 
 
 def main() -> None:
