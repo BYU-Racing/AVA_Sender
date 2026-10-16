@@ -30,6 +30,7 @@ ubx = UBXReader(ser, protfilter=RTCM3_PROTOCOL | UBX_PROTOCOL)
 WS_HOST = os.getenv("WS_BIND_HOST", "0.0.0.0")
 WS_PORT = int(os.getenv("WS_PORT", "8081"))
 SURV_MIN_TIME_SEC = 10
+ACC_LIM_TENTH_MM = 25000
 
 WS_PREFIX = "ws://"
 WS_SUFFIX = ":8081/rtk"
@@ -100,7 +101,10 @@ def start_survey_in():
             "CFG_TMODE_SVIN_MIN_DUR",
             SURV_MIN_TIME_SEC,
         ),  # Minimum survey-in duration (seconds)
-        ("CFG_TMODE_SVIN_ACC_LIMIT", 20000),  # Accuracy limit, 5m (0.1 mm units)
+        (
+            "CFG_TMODE_SVIN_ACC_LIMIT",
+            ACC_LIM_TENTH_MM,
+        ),  # Accuracy limit, 5m (0.1 mm units)
         # Output RTCM3 messages over USB
         ("CFG_MSGOUT_RTCM_3X_TYPE1005_USB", 1),
         ("CFG_MSGOUT_RTCM_3X_TYPE1074_USB", 1),  # GPS MSM4
