@@ -21,7 +21,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.sync.server import serve
 
 # port = "/dev/ttyACM0" # Linux
-port = "COM5"  # Windows
+port = "COM6"  # Windows
 baud = 115200
 
 ser = Serial(port, baud, timeout=1)
@@ -29,6 +29,7 @@ ubx = UBXReader(ser, protfilter=RTCM3_PROTOCOL | UBX_PROTOCOL)
 
 WS_HOST = os.getenv("WS_BIND_HOST", "0.0.0.0")
 WS_PORT = int(os.getenv("WS_PORT", "8081"))
+SURV_MIN_TIME_SEC = 10
 
 WS_PREFIX = "ws://"
 WS_SUFFIX = ":8081/rtk"
@@ -95,7 +96,10 @@ def start_survey_in():
         ("CFG_MSGOUT_UBX_NAV_SVIN_USB", 1),  # Enable NAV-SVIN message output
         # Survey-in mode configuration
         ## Quick test, 60 50000. Temp testing, 300 20000. Longer-term 18000 10000.
-        ("CFG_TMODE_SVIN_MIN_DUR", 300),  # Minimum survey-in duration (seconds)
+        (
+            "CFG_TMODE_SVIN_MIN_DUR",
+            SURV_MIN_TIME_SEC,
+        ),  # Minimum survey-in duration (seconds)
         ("CFG_TMODE_SVIN_ACC_LIMIT", 20000),  # Accuracy limit, 5m (0.1 mm units)
         # Output RTCM3 messages over USB
         ("CFG_MSGOUT_RTCM_3X_TYPE1005_USB", 1),
@@ -160,9 +164,16 @@ def main():
                 while not stop_event.is_set():
                     raw, msg = ubx.read()
 
-                    if msg is None or protocol(raw) != RTCM3_PROTOCOL:
-                        print("No GNSS message received (read timeout)", flush=True)
+                    if msg is None:
+                        print("GNSS read timeout", flush=True)
                         continue
+
+                    if protocol(raw) != RTCM3_PROTOCOL:
+                        continue
+
+                    # print(
+                    #     f"RTCM generated: {msg.identity}, {len(raw)} bytes", flush=True
+                    # )
 
                     with client_lock:
                         corrections = client_queue
