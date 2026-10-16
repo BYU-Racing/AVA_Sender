@@ -128,7 +128,7 @@ def main() -> None:
                             print("Ignoring non-binary WS msg")
                             continue
 
-                        # ser.write(data)
+                        ser.write(data)
 
             except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake) as err:
                 print(f"WS not connected: {err}", flush=True)
