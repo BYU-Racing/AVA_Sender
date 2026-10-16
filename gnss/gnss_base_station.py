@@ -1,6 +1,12 @@
 # Filename: gnss_base_station.py
 # Author:   Blake Hill
 
+
+import os
+import threading
+import time
+from queue import Empty, Full, Queue
+
 from pyubx2 import (
     RTCM3_PROTOCOL,
     SET_LAYER_RAM,
@@ -11,19 +17,71 @@ from pyubx2 import (
     protocol,
 )
 from serial import Serial
-from websockets.sync.client import connect
+from websockets.exceptions import ConnectionClosed
+from websockets.sync.server import serve
 
 # port = "/dev/ttyACM0" # Linux
-port = "COM5"  # Windows
+port = "COM6"  # Windows
 baud = 115200
 
 ser = Serial(port, baud, timeout=1)
 ubx = UBXReader(ser, protfilter=RTCM3_PROTOCOL | UBX_PROTOCOL)
 
+WS_HOST = os.getenv("WS_BIND_HOST", "0.0.0.0")
+WS_PORT = int(os.getenv("WS_PORT", "8081"))
+SURV_MIN_TIME_SEC = 10
+
 WS_PREFIX = "ws://"
-WS_SUFFIX = ":8080/rtk"
+WS_SUFFIX = ":8081/rtk"
 ws_ip = "localhost"
-ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
+
+client_lock = threading.Lock()
+client_queue = None
+stop_event = threading.Event()
+
+
+def handle_client(ws):
+    global client_queue
+
+    if ws.request.path != "/rtk":
+        ws.close(code=1008, reason="Use /rtk")
+        return
+
+    corrections = Queue(maxsize=32)
+
+    with client_lock:
+        client_spot_free = client_queue is None
+        if client_spot_free:
+            client_queue = corrections
+
+    if not client_spot_free:  # Rover already connected
+        ws.close(code=1008, reason="A rover is already connected")
+        return
+
+    print(f"Rover connected: {ws.remote_address}", flush=True)
+
+    try:
+        while not stop_event.is_set():
+            try:
+                time_created, raw = corrections.get(block=True, timeout=0.5)
+            except Empty:
+                try:
+                    ws.recv(timeout=0)
+                except TimeoutError:
+                    pass
+                continue
+
+            if time.monotonic() - time_created > 1:
+                continue
+
+            ws.send(raw)
+
+    except ConnectionClosed:
+        pass
+    finally:
+        with client_lock:
+            client_queue = None
+        print("Rover disconnected; waiting for a connection", flush=True)
 
 
 # Configure the F9P for survey-in mode to find base station location
@@ -38,7 +96,10 @@ def start_survey_in():
         ("CFG_MSGOUT_UBX_NAV_SVIN_USB", 1),  # Enable NAV-SVIN message output
         # Survey-in mode configuration
         ## Quick test, 60 50000. Temp testing, 300 20000. Longer-term 18000 10000.
-        ("CFG_TMODE_SVIN_MIN_DUR", 300),  # Minimum survey-in duration (seconds)
+        (
+            "CFG_TMODE_SVIN_MIN_DUR",
+            SURV_MIN_TIME_SEC,
+        ),  # Minimum survey-in duration (seconds)
         ("CFG_TMODE_SVIN_ACC_LIMIT", 20000),  # Accuracy limit, 5m (0.1 mm units)
         # Output RTCM3 messages over USB
         ("CFG_MSGOUT_RTCM_3X_TYPE1005_USB", 1),
@@ -81,23 +142,60 @@ def check_survey_in() -> bool:
 
 
 # Main Code starts
-start_survey_in()
+def main():
+    try:
+        start_survey_in()
+        while not check_survey_in():
+            pass
 
-while not check_survey_in():
-    pass
+        with serve(
+            handle_client,
+            WS_HOST,
+            WS_PORT,
+            ping_interval=10,
+            ping_timeout=10,
+            close_timeout=2,
+        ) as server:
+            server_thread = threading.Thread(target=server.serve_forever)
+            server_thread.start()
+            print("RTK server started")
 
-with connect(ws_url) as ws:
-    print(f"Connected to WS at {ws_url}", flush=True)
-    while True:  # Main loop
-        raw, msg = ubx.read()
+            try:
+                while not stop_event.is_set():
+                    raw, msg = ubx.read()
 
-        if msg is None:
-            print("No GNSS message received (read timeout)", flush=True)
-            continue
+                    if msg is None:
+                        print("GNSS read timeout", flush=True)
+                        continue
 
-        if protocol(raw) == RTCM3_PROTOCOL:
-            ws.send(raw)
-            print(
-                f"RTCM3 sent: {msg.identity}, length: {len(raw)} bytes",
-                flush=True,
-            )
+                    if protocol(raw) != RTCM3_PROTOCOL:
+                        continue
+
+                    # print(
+                    #     f"RTCM generated: {msg.identity}, {len(raw)} bytes", flush=True
+                    # )
+
+                    with client_lock:
+                        corrections = client_queue
+
+                    if corrections is not None:
+                        try:
+                            corrections.put_nowait((time.monotonic(), raw))
+                        except Full:
+                            pass  # Drop packet when queue is full
+
+            finally:
+                stop_event.set()
+                server.shutdown()
+                server_thread.join()
+    finally:
+        stop_event.set()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nStopped by Ctrl+C", flush=True)
+    finally:
+        ser.close()

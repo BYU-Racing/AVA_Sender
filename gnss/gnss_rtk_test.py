@@ -1,10 +1,12 @@
 # Filename: gnss_rtk_test.py
 # Author:   Blake Hill
 
-#rewrite this one into C++. This guy runs on the raspberry pi. So we want to include in AVA Sender. 
+# rewrite this one into C++. This guy runs on the raspberry pi. So we want to include in AVA Sender.
 
+import os
 import threading
 
+from dotenv import load_dotenv
 from pyubx2 import (
     SET_LAYER_RAM,
     TXN_NONE,
@@ -13,21 +15,25 @@ from pyubx2 import (
     UBXReader,
 )
 from serial import Serial
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 from websockets.sync.client import connect
 
 port = "/dev/ttyACM0"
 baud = 115200
 
 WS_PREFIX = "ws://"
-WS_SUFFIX = ":8080/rtk"
+WS_SUFFIX = ":8081/rtk"
 ws_ip = "localhost"
-ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
 
 ser = Serial(port, baud, timeout=1)
 ubx = UBXReader(ser, protfilter=UBX_PROTOCOL)
 
 stop_event = threading.Event()
+
+
+def get_ws_ip():
+    load_dotenv()
+    return os.environ["BASE_STATION_IP"]
 
 
 def config_ubx():
@@ -50,7 +56,7 @@ def config_ubx():
     ser.flush()
 
 
-# Called in a separate thread
+# # Called in a separate thread
 def read_from_ubx(ubx: UBXReader, stop_event: threading.Event) -> None:
     # carrSoln = carrier-range solution status
     solution_status = {0: "No RTK", 1: "RTK float", 2: "RTK fixed"}
@@ -92,11 +98,11 @@ def read_from_ubx(ubx: UBXReader, stop_event: threading.Event) -> None:
                 2: "Used successfully",
             }
             usage = rtcm_usage.get(msg.msgUsed, f"Unknown ({msg.msgUsed})")
-            print(
-                f"RTCM recv from read: type={msg.msgType}, "
-                f"used={usage}, CRC fail?={bool(msg.crcFailed)}",
-                flush=True,
-            )
+            # print(
+            #     f"RTCM recv from read: type={msg.msgType}, "
+            #     f"used={usage}, CRC fail?={bool(msg.crcFailed)}",
+            #     flush=True,
+            # )
 
 
 def main() -> None:
@@ -105,10 +111,14 @@ def main() -> None:
         target=read_from_ubx, args=(ubx, stop_event), daemon=True
     )
     reader_thread.start()
+
+    ws_ip = get_ws_ip()
+    ws_url = WS_PREFIX + ws_ip + WS_SUFFIX
+
     try:
         while not stop_event.is_set():
             try:
-                with connect(ws_url) as ws:
+                with connect(ws_url, open_timeout=5, close_timeout=2) as ws:
                     print("Connected to Base Station WS")
                     for data in ws:
                         if stop_event.is_set():
@@ -120,10 +130,8 @@ def main() -> None:
 
                         ser.write(data)
 
-            except ConnectionClosed as err:
-                print(f"WS Disconnected: {err}")
-            except OSError as err:
-                print(f"Couldn't connect: {err}")
+            except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake) as err:
+                print(f"WS not connected: {err}", flush=True)
 
             if not stop_event.is_set():
                 print("Reconnecting to WS in 1s")
