@@ -11,10 +11,11 @@
 #define CIRC_BUF_OVERHEAD_SIZE 8
 #define CIRC_BUF_HEADER_SIZE 6
 #define CFG_PAYLOAD_SIZE 34
+#define UBX_PAYLOAD_LENGTH_OFFSET 4
 
 // MSG IDs
 // UBX message IDs, Class << 8 | ID
-constexpr uint16_t UBX_NAV_PVT = 0x0107;
+// constexpr uint16_t UBX_NAV_PVT = 0x0107;
 constexpr uint16_t UBX_RXM_RTCM = 0x0232;
 constexpr uint16_t UBX_ACK_ACK = 0x0501;
 constexpr uint16_t UBX_ACK_NAK = 0x0500;
@@ -58,9 +59,9 @@ bool tryExtractUbxFrame(
     boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame
 );
 
-void handleUbxMessage(std::vector<std::uint8_t> &ubx_frame); // Routes UBX msgs to spec handlers.
-void handleAck(std::vector<std::uint8_t> &ubx_frame);        // Handler for UBX-ACK messages.
-void handleNavPvt(std::vector<std::uint8_t> &ubx_frame);     // Handler for UBX-NAV-PVT messages.
-bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame);    // Handler for UBX-RXM-RTCM messages.
+void handleUbxMessage(std::vector<std::uint8_t> &ubx_frame);   // Routes UBX msgs to spec handlers.
+void handleAck(std::vector<std::uint8_t> &ubx_frame);          // Handler for UBX-ACK messages.
+void handleNavPvt(const std::vector<std::uint8_t> &ubx_frame); // Handler for UBX-NAV-PVT messages.
+bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame);      // Handler for UBX-RXM-RTCM messages.
 
 #endif /* CAD521CE_2B04_42DE_95E2_6A23FD2563DC */

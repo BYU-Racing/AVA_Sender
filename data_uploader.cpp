@@ -84,7 +84,7 @@ struct queued_packet {
 
 /* Non-Const Global Variables */
 volatile std::sig_atomic_t stop_requested = 0;
-bool gnss_on = False;
+bool gnss_on = true;
 /* NON-CONST GLOBALS END */
 
 /* MARK: Helper Funcs
@@ -169,7 +169,7 @@ void setupWebSocket(
 
     webSocket.setUrl(url);
     webSocket.disableAutomaticReconnection();
-    webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
+    webSocket.setOnMessageCallback([&, close_ws](const ix::WebSocketMessagePtr &msg) {
         using Type = ix::WebSocketMessageType;
 
         if (msg->type == Type::Open) {
@@ -229,7 +229,7 @@ void gnssReader(
         } else if (msg->type == Type::Close) {
             printf("Base Station WS closed\n");
         } else if (msg->type == Type::Error) {
-            fprintf(stderr, "Base Station WS Error: %s\n", msg->errorInfo.reason);
+            fprintf(stderr, "Base Station WS Error: %s\n", msg->errorInfo.reason.c_str());
         }
     });
     bsWebSocket.start();
@@ -374,8 +374,9 @@ int main() {
         return 1;
     }
 
+    int gnss_fd = -1;
     if (gnss_on) {
-        int gnss_fd = open(GNSS_DEV, O_RDWR | O_NOCTTY);
+        gnss_fd = open(GNSS_DEV, O_RDWR | O_NOCTTY);
         if (gnss_fd < 0) {
             std::perror("Failed to open GNSS socket");
             return 1;
@@ -393,7 +394,10 @@ int main() {
     thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
 
     // GNSS reader thread
-    thread gnss_thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
+    thread gnss_thread;
+    if (gnss_on) {
+        gnss_thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
+    }
     /* FDS & THREADS END */
 
     // MARK: Sender Loop
@@ -474,8 +478,10 @@ int main() {
     shutdown(can1_fd, SHUT_RD);
     can0_thread.join();
     can1_thread.join();
-    if (gnss_on) {
+    if (gnss_thread.joinable()) {
         gnss_thread.join();
+    }
+    if (gnss_fd >= 0) {
         close(gnss_fd);
     }
     close(can0_fd);
