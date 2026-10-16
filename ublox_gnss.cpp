@@ -7,20 +7,17 @@
 
 #include "ublox_gnss.h"
 
-
 // MARK: UBX Constants
 
 constexpr uint8_t UBX_CLASS_NAV = 0x01;
 constexpr uint8_t UBX_ID_PVT = 0x07;
 
 constexpr uint16_t UBX_NAV_PVT =
-    (static_cast<uint16_t>(UBX_CLASS_NAV) << 8) |
-    static_cast<uint16_t>(UBX_ID_PVT);
+    (static_cast<uint16_t>(UBX_CLASS_NAV) << 8) | static_cast<uint16_t>(UBX_ID_PVT);
 
 constexpr std::size_t UBX_HEADER_SIZE = 6;
 constexpr std::size_t UBX_CHECKSUM_SIZE = 2;
-constexpr std::size_t UBX_FRAME_OVERHEAD =
-    UBX_HEADER_SIZE + UBX_CHECKSUM_SIZE;
+constexpr std::size_t UBX_FRAME_OVERHEAD = UBX_HEADER_SIZE + UBX_CHECKSUM_SIZE;
 
 // MARK: NAV-PVT Constants
 
@@ -65,12 +62,7 @@ enum class PVT_FixType : uint8_t {
 };
 
 // NAV-PVT RTK statuses
-enum class PVT_CarrierSolution : uint8_t {
-    NO_RTK = 0,
-    RTK_FLOAT = 1,
-    RTK_FIXED = 2
-};
-
+enum class PVT_CarrierSolution : uint8_t { NO_RTK = 0, RTK_FLOAT = 1, RTK_FIXED = 2 };
 
 // MARK: Help Funcs
 
@@ -93,19 +85,17 @@ static bool validateUbxChecksum(std::vector<std::uint8_t> frame, std::uint16_t l
     return (ck_a == CHECKSUM_A && ck_b == CHECKSUM_B);
 }
 
-static std::uint16_t readUInt16LE(const std::uint8_t* data) {
-    return static_cast<std::uint16_t>(data[0]) |
-           (static_cast<std::uint16_t>(data[1]) << 8);
+static std::uint16_t readUInt16LE(const std::uint8_t *data) {
+    return static_cast<std::uint16_t>(data[0]) | (static_cast<std::uint16_t>(data[1]) << 8);
 }
 
-static std::uint32_t readUInt32LE(const std::uint8_t* data) {
-    return static_cast<std::uint32_t>(data[0]) |
-           (static_cast<std::uint32_t>(data[1]) << 8) |
+static std::uint32_t readUInt32LE(const std::uint8_t *data) {
+    return static_cast<std::uint32_t>(data[0]) | (static_cast<std::uint32_t>(data[1]) << 8) |
            (static_cast<std::uint32_t>(data[2]) << 16) |
            (static_cast<std::uint32_t>(data[3]) << 24);
 }
 
-static std::int32_t readInt32LE(const std::uint8_t* data) {
+static std::int32_t readInt32LE(const std::uint8_t *data) {
     return static_cast<std::int32_t>(readUInt32LE(data));
 }
 
@@ -278,13 +268,12 @@ void handleUbxMessage(std::vector<std::uint8_t> &ubx_frame) {
     }
 }
 // MARK: NAV PVT
-void handleNavPvt(const std::vector<std::uint8_t>& ubx_frame) {
+void handleNavPvt(const std::vector<std::uint8_t> &ubx_frame) {
     if (ubx_frame.size() < UBX_FRAME_OVERHEAD) {
         return;
     }
 
-    const std::uint16_t payload_length =
-        readUInt16LE(ubx_frame.data() + UBX_PAYLOAD_LENGTH_OFFSET);
+    const std::uint16_t payload_length = readUInt16LE(ubx_frame.data() + UBX_PAYLOAD_LENGTH_OFFSET);
 
     // NAV-PVT has a 92-byte payload. The input is a complete UBX frame.
     if (payload_length != NAV_PVT_PAYLOAD_SIZE ||
@@ -293,59 +282,54 @@ void handleNavPvt(const std::vector<std::uint8_t>& ubx_frame) {
         return;
     }
 
-    const std::uint8_t* payload = ubx_frame.data() + UBX_HEADER_SIZE;
+    const std::uint8_t *payload = ubx_frame.data() + UBX_HEADER_SIZE;
 
-    const double longitude =
-        readInt32LE(payload + PVT_LONGITUDE_OFFSET) * PVT_COORDINATE_SCALE;
-    const double latitude =
-        readInt32LE(payload + PVT_LATITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const double longitude = readInt32LE(payload + PVT_LONGITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const double latitude = readInt32LE(payload + PVT_LATITUDE_OFFSET) * PVT_COORDINATE_SCALE;
     const double elevation =
         readInt32LE(payload + PVT_HEIGHT_MSL_OFFSET) * PVT_MILLIMETERS_TO_METERS;
     const double horizontal_accuracy =
-        readUInt32LE(payload + PVT_HORIZONTAL_ACCURACY_OFFSET) *
-        PVT_MILLIMETERS_TO_METERS;
-    const double speed =
-        readInt32LE(payload + PVT_GROUND_SPEED_OFFSET) *
-        PVT_MILLIMETERS_TO_METERS;
-    const double heading =
-        readInt32LE(payload + PVT_HEADING_OFFSET) * PVT_HEADING_SCALE;
+        readUInt32LE(payload + PVT_HORIZONTAL_ACCURACY_OFFSET) * PVT_MILLIMETERS_TO_METERS;
+    const double speed = readInt32LE(payload + PVT_GROUND_SPEED_OFFSET) * PVT_MILLIMETERS_TO_METERS;
+    const double heading = readInt32LE(payload + PVT_HEADING_OFFSET) * PVT_HEADING_SCALE;
 
     const std::uint8_t flags = payload[PVT_FLAGS_OFFSET];
     const std::uint8_t fix_type = payload[PVT_FIX_TYPE_OFFSET];
     const std::uint8_t satellites = payload[PVT_NUM_SATELLITES_OFFSET];
 
     const bool gnss_fix_ok = (flags & PVT_GNSS_FIX_OK_MASK) != 0;
-    const bool differential_solution =
-        (flags & PVT_DIFFERENTIAL_SOLUTION_MASK) != 0;
-    const bool position_valid =
-        (payload[PVT_FLAGS3_OFFSET] & PVT_INVALID_LLH_MASK) == 0;
+    const bool differential_solution = (flags & PVT_DIFFERENTIAL_SOLUTION_MASK) != 0;
+    const bool position_valid = (payload[PVT_FLAGS3_OFFSET] & PVT_INVALID_LLH_MASK) == 0;
 
     const auto carrier_solution = static_cast<PVT_CarrierSolution>(
-        (flags & PVT_CARRIER_SOLUTION_MASK) >>
-        PVT_CARRIER_SOLUTION_SHIFT
+        (flags & PVT_CARRIER_SOLUTION_MASK) >> PVT_CARRIER_SOLUTION_SHIFT
     );
 
-    const char* rtk_status = "Unknown";
+    const char *rtk_status = "Unknown";
     switch (carrier_solution) {
-        case PVT_CarrierSolution::NO_RTK:    rtk_status = "No RTK"; break;
-        case PVT_CarrierSolution::RTK_FLOAT: rtk_status = "RTK float"; break;
-        case PVT_CarrierSolution::RTK_FIXED: rtk_status = "RTK fixed"; break;
-        default: break;
+    case PVT_CarrierSolution::NO_RTK:
+        rtk_status = "No RTK";
+        break;
+    case PVT_CarrierSolution::RTK_FLOAT:
+        rtk_status = "RTK float";
+        break;
+    case PVT_CarrierSolution::RTK_FIXED:
+        rtk_status = "RTK fixed";
+        break;
+    default:
+        break;
     }
 
     std::printf(
-        "%s | DiffCorrections: %s | FixOK: %s | Fix Type: %u | NumSat: %u\n",
-        rtk_status,
-        differential_solution ? "true" : "false",
-        gnss_fix_ok ? "true" : "false",
-        static_cast<unsigned>(fix_type),
-        static_cast<unsigned>(satellites)
+        "%s | DiffCorrections: %s | FixOK: %s | Fix Type: %u | NumSat: %u\n", rtk_status,
+        differential_solution ? "true" : "false", gnss_fix_ok ? "true" : "false",
+        static_cast<unsigned>(fix_type), static_cast<unsigned>(satellites)
     );
 
     if (position_valid) {
         std::printf(
-            "Lat: %.7f | Lon: %.7f | Acc: %.3f m | Elev: %.3f m\n",
-            latitude, longitude, horizontal_accuracy, elevation
+            "Lat: %.7f | Lon: %.7f | Acc: %.3f m | Elev: %.3f m\n", latitude, longitude,
+            horizontal_accuracy, elevation
         );
     } else {
         std::printf("Pos Invalid\n");
@@ -358,32 +342,31 @@ void handleAck(std::vector<std::uint8_t> &ubx_frame) {}
 
 bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame) {
     // Need to check if the message is used, get type, and check msg.crcFailed.
-    std::printf("Received UBX-RXM-RTCM message of length: %uz\n", ubx_frame.size());
+    std::printf("Received UBX-RXM-RTCM message of length: %zu\n", ubx_frame.size());
 
-    //First, check if the message is used.
-    //First, actually, let's get the flags byte out.
+    // First, check if the message is used.
+    // First, actually, let's get the flags byte out.
 
     uint8_t flags = ubx_frame[7];
-    //shift right to get rid of crcFailed bit, initially the LSB.
-    //Now, check if the message is used.
-    const uint8_t crcFailed = flags & 0x01; //If zero, passed CRC check, if 1, failed
+    // shift right to get rid of crcFailed bit, initially the LSB.
+    // Now, check if the message is used.
+    const uint8_t crcFailed = flags & 0x01;      // If zero, passed CRC check, if 1, failed
     const uint8_t msgUsed = (flags >> 1) & 0x03; // 0 = unknown, 1 = unused, 2 = used
 
-    //Checking for crcFailed first.
-    if(crcFailed) { //Fails when true
+    // Checking for crcFailed first.
+    if (crcFailed) { // Fails when true
         std::cout << "UBX-RXM-RTCM message failed CRC check" << std::endl;
         return false;
     }
 
-    
-    //Checking for msgUsed state.
-    if(msgUsed == 0) {
+    // Checking for msgUsed state.
+    if (msgUsed == 0) {
         std::cout << "UBX-RXM-RTCM msgUsed in unknown state" << std::endl;
         return false;
-    } else if(msgUsed == 1) {
+    } else if (msgUsed == 1) {
         std::cout << "UBX-RXM-RTCM msgUsed in unused state" << std::endl;
         return false;
-    } else if(msgUsed == 2) {
+    } else if (msgUsed == 2) {
         std::cout << "UBX-RXM-RTCM msgUsed in used state" << std::endl;
     }
     return false;

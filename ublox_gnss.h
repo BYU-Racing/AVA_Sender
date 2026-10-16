@@ -3,6 +3,7 @@
 
 #include <boost/circular_buffer.hpp>
 #include <cstdint>
+#include <iostream>
 #include <vector>
 
 // MARK: Constants
