@@ -28,6 +28,7 @@
 #include <thread>
 #include <vector>
 
+#include "globals.h"
 #include "ublox_gnss.h"
 
 // MARK: Namespace
@@ -52,28 +53,13 @@ using std::thread;
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
 const std::string bs_url_suffix = ":8081/rtk";
-const char *GNSS_DEV = "/dev/ttyACM0";
-const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
-const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
-const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
-const uint16_t NUM_PACKET_RETRIES = 20;    // Retries sending a packet this many times, then closes
-const size_t GNSS_BUF_SIZE = 2048;         // Buffer size for reading GNSS data
-
-/*  Data struct for sending CAN frame to server, packed to avoid padding.
-    Struct for queued packet as well for retrying failed sends.
-{
-    timestamp: int,
-    id: int,
-    length: int, // up to 8
-    bytes: List[int], // length: up to 8
-}
-*/
-struct pi_to_server {
-    uint32_t timestamp;
-    uint32_t id;
-    uint8_t length;
-    uint8_t bytes[8];
-} __attribute__((packed));
+constexpr const char *GNSS_DEV = "/dev/ttyACM0";
+constexpr uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
+constexpr uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
+constexpr uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
+constexpr uint16_t NUM_PACKET_RETRIES = 20; // Retries sending a packet this many times, then closes
+constexpr size_t GNSS_BUF_SIZE = 2048;      // Buffer size for reading GNSS data
+constexpr uint32_t GNSS_CAN_ID = 9;
 
 struct queued_packet {
     pi_to_server pkt;
@@ -170,6 +156,10 @@ void setupWebSocket(
     webSocket.setUrl(url);
     webSocket.disableAutomaticReconnection();
     webSocket.setOnMessageCallback([&, close_ws](const ix::WebSocketMessagePtr &msg) {
+        // explanation of [&, close_ws]:
+        // &:           means to capture local variables used by the callback
+        // close_ws:    capture close_ws as a copy (lambdas die when surrouding func call rets)
+        //              --Anything created in close_ws dies when func call rets
         using Type = ix::WebSocketMessageType;
 
         if (msg->type == Type::Open) {
@@ -234,11 +224,27 @@ void gnssReader(
     });
     bsWebSocket.start();
 
+    // MARK: GNSS Loop
     // Loop to read from GNSS Module and do stuff with data
     while (running) {
         // Handle all UBX frames currently in buffer
         while (running && tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
-            handleUbxMessage(ubx_frame);
+            uint16_t msg_type = handleUbxMessage(ubx_frame);
+            pi_to_server pkt{};
+            if (msg_type == UBX_NAV_PVT && handleNavPvt(ubx_frame, pkt)) {
+                pkt.timestamp = getTimeNow32();
+                pkt.id = GNSS_CAN_ID;
+                queued_packet qd;
+                qd.pkt = pkt;
+                qd.last_send_attempt = 0;
+                qd.retries = 0;
+                {
+                    std::lock_guard<std::mutex> lk(m);
+                    q.push(qd);
+                }
+            } else if (msg_type == UBX_RXM_RTCM) {
+                handleRxmRtcm(ubx_frame);
+            }
         }
 
         if (!running) {

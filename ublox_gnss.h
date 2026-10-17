@@ -1,6 +1,7 @@
 #ifndef CAD521CE_2B04_42DE_95E2_6A23FD2563DC
 #define CAD521CE_2B04_42DE_95E2_6A23FD2563DC
 
+#include "globals.h"
 #include <boost/circular_buffer.hpp>
 #include <cstdint>
 #include <iostream>
@@ -21,6 +22,11 @@ constexpr uint16_t UBX_RXM_RTCM = 0x0232;
 constexpr uint16_t UBX_ACK_ACK = 0x0501;
 constexpr uint16_t UBX_ACK_NAK = 0x0500;
 constexpr uint16_t UBX_CFG_VALSET = 0x068A;
+
+constexpr uint8_t UBX_CLASS_NAV = 0x01;
+constexpr uint8_t UBX_ID_PVT = 0x07;
+constexpr uint16_t UBX_NAV_PVT =
+    (static_cast<uint16_t>(UBX_CLASS_NAV) << 8) | static_cast<uint16_t>(UBX_ID_PVT);
 
 // GNSS CFG
 // RAM-only config
@@ -60,9 +66,11 @@ bool tryExtractUbxFrame(
     boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame
 );
 
-void handleUbxMessage(std::vector<std::uint8_t> &ubx_frame);   // Routes UBX msgs to spec handlers.
-void handleAck(std::vector<std::uint8_t> &ubx_frame);          // Handler for UBX-ACK messages.
-void handleNavPvt(const std::vector<std::uint8_t> &ubx_frame); // Handler for UBX-NAV-PVT messages.
-bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame);      // Handler for UBX-RXM-RTCM messages.
+// Routes UBX msgs to spec handlers.
+uint16_t handleUbxMessage(std::vector<std::uint8_t> &ubx_frame);
+void handleAck(std::vector<std::uint8_t> &ubx_frame); // Handler for UBX-ACK messages.
+// Handler for UBX-NAV-PVT messages.
+bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt);
+bool handleRxmRtcm(std::vector<std::uint8_t> &ubx_frame); // Handler for UBX-RXM-RTCM messages.
 
 #endif /* CAD521CE_2B04_42DE_95E2_6A23FD2563DC */

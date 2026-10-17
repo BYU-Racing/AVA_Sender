@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <utility>
 
 #include <termios.h>
@@ -8,13 +9,6 @@
 #include "ublox_gnss.h"
 
 // MARK: UBX Constants
-
-constexpr uint8_t UBX_CLASS_NAV = 0x01;
-constexpr uint8_t UBX_ID_PVT = 0x07;
-
-constexpr uint16_t UBX_NAV_PVT =
-    (static_cast<uint16_t>(UBX_CLASS_NAV) << 8) | static_cast<uint16_t>(UBX_ID_PVT);
-
 constexpr std::size_t UBX_HEADER_SIZE = 6;
 constexpr std::size_t UBX_CHECKSUM_SIZE = 2;
 constexpr std::size_t UBX_FRAME_OVERHEAD = UBX_HEADER_SIZE + UBX_CHECKSUM_SIZE;
@@ -250,27 +244,31 @@ bool tryExtractUbxFrame(
 }
 
 // MARK: Msg Handlrs
-void handleUbxMessage(std::vector<std::uint8_t> &ubx_frame) {
-
+// Parses out UBX msg type and returns this for gnss thread to handle.
+// Returns -1 for unhandled msg, 0 for ack/nak, or UBX msg type if it needs to be handled.
+uint16_t handleUbxMessage(std::vector<std::uint8_t> &ubx_frame) {
     uint8_t msg_class = ubx_frame[2];
     uint8_t msg_id = ubx_frame[3];
     if (uint16_t(msg_class << 8 | msg_id) == UBX_NAV_PVT) {
-        handleNavPvt(ubx_frame);
+        return UBX_NAV_PVT;
     } else if (uint16_t(msg_class << 8 | msg_id) == UBX_RXM_RTCM) {
-        handleRxmRtcm(ubx_frame);
+        return UBX_RXM_RTCM;
     } else if (
         uint16_t(msg_class << 8 | msg_id) == UBX_ACK_ACK ||
         uint16_t(msg_class << 8 | msg_id) == UBX_ACK_NAK
     ) {
         handleAck(ubx_frame);
+        return 0;
     } else {
         std::printf("Received unhandled UBX message: Class: %02X, ID: %02X\n", msg_class, msg_id);
+        return -1;
     }
 }
+
 // MARK: NAV PVT
-void handleNavPvt(const std::vector<std::uint8_t> &ubx_frame) {
+bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt) {
     if (ubx_frame.size() < UBX_FRAME_OVERHEAD) {
-        return;
+        return false;
     }
 
     const std::uint16_t payload_length = readUInt16LE(ubx_frame.data() + UBX_PAYLOAD_LENGTH_OFFSET);
@@ -279,8 +277,10 @@ void handleNavPvt(const std::vector<std::uint8_t> &ubx_frame) {
     if (payload_length != NAV_PVT_PAYLOAD_SIZE ||
         ubx_frame.size() != UBX_FRAME_OVERHEAD + payload_length) {
         std::fprintf(stderr, "Invalid NAV-PVT frame length\n");
-        return;
+        return false;
     }
+
+    bool ret = true;
 
     const std::uint8_t *payload = ubx_frame.data() + UBX_HEADER_SIZE;
 
@@ -326,16 +326,26 @@ void handleNavPvt(const std::vector<std::uint8_t> &ubx_frame) {
         static_cast<unsigned>(fix_type), static_cast<unsigned>(satellites)
     );
 
-    if (position_valid) {
+    if (position_valid && gnss_fix_ok) {
         std::printf(
             "Lat: %.7f | Lon: %.7f | Acc: %.3f m | Elev: %.3f m\n", latitude, longitude,
             horizontal_accuracy, elevation
         );
+
+        // Setting values for GPS pkt
+        const float lat = static_cast<float>(latitude);
+        const float lon = static_cast<float>(longitude);
+        std::memcpy(pkt.bytes, &lat, sizeof(lat));
+        std::memcpy(pkt.bytes + 4, &lon, sizeof(lon));
+        pkt.length = 8;
     } else {
         std::printf("Pos Invalid\n");
+        ret = false;
     }
 
     std::printf("Speed: %.3f m/s | Heading: %.5f deg\n\n", speed, heading);
+
+    return ret;
 }
 
 void handleAck(std::vector<std::uint8_t> &ubx_frame) {}
