@@ -1,6 +1,8 @@
 #ifndef CAD521CE_2B04_42DE_95E2_6A23FD2563DC
 #define CAD521CE_2B04_42DE_95E2_6A23FD2563DC
 
+// TODO: Add in UBX-NAV-HPPOSLLH functionality for high-def GPS
+
 #include "globals.h"
 #include <boost/circular_buffer.hpp>
 #include <cstdint>
@@ -38,6 +40,8 @@ constexpr uint32_t CFG_USBINPROT_RTCM3X = 0x10770004;
 constexpr uint32_t CFG_USBOUTPROT_UBX = 0x10780001;
 constexpr uint32_t CFG_MSGOUT_UBX_NAV_PVT_USB = 0x20910009;
 constexpr uint32_t CFG_MSGOUT_UBX_RXM_RTCM_USB = 0x2091026B;
+constexpr uint32_t CFG_RATE_MEAS = 0x30210001;
+constexpr uint32_t CFG_RATE_NAV = 0x30210002;
 // Vals for each Key ID
 constexpr uint8_t CFG_TMODE_MODE_ROV = 0x00;
 constexpr uint8_t CFG_USBINPROT_UBX_EN = 0x01;
@@ -45,6 +49,8 @@ constexpr uint8_t CFG_USBINPROT_RTCM3X_EN = 0x01;
 constexpr uint8_t CFG_USBOUTPROT_UBX_EN = 0x01;
 constexpr uint8_t CFG_MSGOUT_UBX_NAV_PVT_USB_EN = 0x01;
 constexpr uint8_t CFG_MSGOUT_UBX_RXM_RTCM_USB_EN = 0x01;
+constexpr uint16_t MEAS_RATE_MS = 100;
+constexpr uint16_t NAV_SOL_PER_MEAS = 0x01;
 
 // MARK: Func Desc's
 // ======== Helper funcs ========

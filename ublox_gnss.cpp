@@ -60,6 +60,11 @@ enum class PVT_CarrierSolution : uint8_t { NO_RTK = 0, RTK_FLOAT = 1, RTK_FIXED 
 
 // MARK: Help Funcs
 
+static void appendU16LE(std::vector<uint8_t> &vec, std::uint16_t value) {
+    vec.push_back(static_cast<std::uint8_t>(value & 0xFF));
+    vec.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+}
+
 static void appendU32LE(std::vector<uint8_t> &vec, std::uint32_t value) {
     vec.push_back(static_cast<std::uint8_t>(value & 0xFF));
     vec.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
@@ -138,6 +143,11 @@ bool config_gnss(int gnss_fd) {
     payload.push_back(CFG_MSGOUT_UBX_NAV_PVT_USB_EN);
     appendU32LE(payload, CFG_MSGOUT_UBX_RXM_RTCM_USB);
     payload.push_back(CFG_MSGOUT_UBX_RXM_RTCM_USB_EN);
+    // Set measurement rates
+    appendU32LE(payload, CFG_RATE_MEAS);
+    appendU16LE(payload, MEAS_RATE_MS);
+    appendU32LE(payload, CFG_RATE_NAV);
+    appendU16LE(payload, NAV_SOL_PER_MEAS);
     uint16_t payload_length = static_cast<uint16_t>(payload.size());
 
     std::vector<std::uint8_t> cfg_valset_msg;
