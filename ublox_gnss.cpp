@@ -41,7 +41,7 @@ constexpr uint8_t PVT_CARRIER_SOLUTION_MASK = 0xC0;
 constexpr unsigned PVT_CARRIER_SOLUTION_SHIFT = 6;
 
 // Conversion factors
-constexpr float PVT_COORDINATE_SCALE = 0.0000001;
+constexpr double PVT_COORDINATE_SCALE = 0.0000001;
 constexpr double PVT_MILLIMETERS_TO_METERS = 0.001;
 constexpr double PVT_HEADING_SCALE = 0.00001;
 
@@ -284,8 +284,8 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
 
     const std::uint8_t *payload = ubx_frame.data() + UBX_HEADER_SIZE;
 
-    const float longitude = readInt32LE(payload + PVT_LONGITUDE_OFFSET) * PVT_COORDINATE_SCALE;
-    const float latitude = readInt32LE(payload + PVT_LATITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const double longitude = readInt32LE(payload + PVT_LONGITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const double latitude = readInt32LE(payload + PVT_LATITUDE_OFFSET) * PVT_COORDINATE_SCALE;
     const double elevation =
         readInt32LE(payload + PVT_HEIGHT_MSL_OFFSET) * PVT_MILLIMETERS_TO_METERS;
     const double horizontal_accuracy =
@@ -321,10 +321,10 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
     }
 
     auto fill_pkt = [&]() {
-        const float lat = static_cast<float>(latitude);
-        const float lon = static_cast<float>(longitude);
-        std::memcpy(pkt.bytes, &lat, sizeof(lat));
-        std::memcpy(pkt.bytes + 4, &lon, sizeof(lon));
+        // const float lat = static_cast<float>(latitude);
+        // const float lon = static_cast<float>(longitude);
+        std::memcpy(pkt.bytes, payload + PVT_LONGITUDE_OFFSET, 4);
+        std::memcpy(pkt.bytes + 4, payload + PVT_LATITUDE_OFFSET, 4);
         pkt.length = 8;
     };
 
