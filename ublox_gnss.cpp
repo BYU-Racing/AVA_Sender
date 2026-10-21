@@ -325,6 +325,8 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
         const float lon = static_cast<float>(longitude);
         std::memcpy(pkt.bytes, &lat, sizeof(lat));
         std::memcpy(pkt.bytes + 4, &lon, sizeof(lon));
+        std::reverse(pkt.bytes, pkt.bytes + 4);
+        std::reverse(pkt.bytes + 4, pkt.bytes + 8);
         pkt.length = 8;
     };
 
