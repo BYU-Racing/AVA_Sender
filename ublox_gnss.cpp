@@ -284,8 +284,8 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
 
     const std::uint8_t *payload = ubx_frame.data() + UBX_HEADER_SIZE;
 
-    const double longitude = readInt32LE(payload + PVT_LONGITUDE_OFFSET) * PVT_COORDINATE_SCALE;
-    const double latitude = readInt32LE(payload + PVT_LATITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const float longitude = readInt32LE(payload + PVT_LONGITUDE_OFFSET) * PVT_COORDINATE_SCALE;
+    const float latitude = readInt32LE(payload + PVT_LATITUDE_OFFSET) * PVT_COORDINATE_SCALE;
     const double elevation =
         readInt32LE(payload + PVT_HEIGHT_MSL_OFFSET) * PVT_MILLIMETERS_TO_METERS;
     const double horizontal_accuracy =
@@ -320,6 +320,14 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
         break;
     }
 
+    auto fill_pkt = [&]() {
+        const float lat = static_cast<float>(latitude);
+        const float lon = static_cast<float>(longitude);
+        std::memcpy(pkt.bytes, &lat, sizeof(lat));
+        std::memcpy(pkt.bytes + 4, &lon, sizeof(lon));
+        pkt.length = 8;
+    };
+
     std::printf(
         "%s | DiffCorrections: %s | FixOK: %s | Fix Type: %u | NumSat: %u\n", rtk_status,
         differential_solution ? "true" : "false", gnss_fix_ok ? "true" : "false",
@@ -333,11 +341,7 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
         );
 
         // Setting values for GPS pkt
-        const float lat = static_cast<float>(latitude);
-        const float lon = static_cast<float>(longitude);
-        std::memcpy(pkt.bytes, &lat, sizeof(lat));
-        std::memcpy(pkt.bytes + 4, &lon, sizeof(lon));
-        pkt.length = 8;
+        fill_pkt();
     } else {
         std::printf("Pos Invalid\n");
         ret = false;
