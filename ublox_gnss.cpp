@@ -41,7 +41,7 @@ constexpr uint8_t PVT_CARRIER_SOLUTION_MASK = 0xC0;
 constexpr unsigned PVT_CARRIER_SOLUTION_SHIFT = 6;
 
 // Conversion factors
-constexpr double PVT_COORDINATE_SCALE = 0.0000001;
+constexpr float PVT_COORDINATE_SCALE = 0.0000001;
 constexpr double PVT_MILLIMETERS_TO_METERS = 0.001;
 constexpr double PVT_HEADING_SCALE = 0.00001;
 
@@ -325,8 +325,6 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
         const float lon = static_cast<float>(longitude);
         std::memcpy(pkt.bytes, &lat, sizeof(lat));
         std::memcpy(pkt.bytes + 4, &lon, sizeof(lon));
-        std::reverse(pkt.bytes, pkt.bytes + 4);
-        std::reverse(pkt.bytes + 4, pkt.bytes + 8);
         pkt.length = 8;
     };
 
