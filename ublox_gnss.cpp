@@ -330,9 +330,7 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
         break;
     }
 
-    auto fill_pkt = [&]() {
-        // const float lat = static_cast<float>(latitude);
-        // const float lon = static_cast<float>(longitude);
+    auto fillPkt = [&]() {
         std::memcpy(pkt.bytes, payload + PVT_LONGITUDE_OFFSET, 4);
         std::memcpy(pkt.bytes + 4, payload + PVT_LATITUDE_OFFSET, 4);
         pkt.length = 8;
@@ -351,7 +349,7 @@ bool handleNavPvt(const std::vector<std::uint8_t> &ubx_frame, pi_to_server &pkt)
         );
 
         // Setting values for GPS pkt
-        fill_pkt();
+        fillPkt();
     } else {
         std::printf("Pos Invalid\n");
         ret = false;
