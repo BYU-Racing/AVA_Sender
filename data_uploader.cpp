@@ -60,6 +60,7 @@ constexpr uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resendi
 constexpr uint16_t NUM_PACKET_RETRIES = 20; // Retries sending a packet this many times, then closes
 constexpr size_t GNSS_BUF_SIZE = 2048;      // Buffer size for reading GNSS data
 constexpr uint32_t GNSS_CAN_ID = 9;
+constexpr uint32_t GNSS_CAN_ID = 9;
 
 struct queued_packet {
     pi_to_server pkt;

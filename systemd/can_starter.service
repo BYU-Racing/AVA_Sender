@@ -1,0 +1,19 @@
+[Unit]
+Description=CAN Interface Starter
+After=network.target
+
+[Service]
+Type=oneshot
+
+
+# Running as root to ensure 'ip link' has permissions
+ExecStart=/usr/sbin/ip link set can0 up type can bitrate 250000
+ExecStart=/usr/sbin/ip link set can1 up type can bitrate 250000
+
+ExecStart=/usr/bin/bash /home/ava3/AVA_Sender/can_dumpy.sh
+
+# Keep the service active while can_dumpy.sh's background candump runs.
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
