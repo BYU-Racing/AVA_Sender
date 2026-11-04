@@ -6,7 +6,7 @@ INTERVAL=10
 LOGFILE="lte_log_$(date +%Y%m%d_%H%M%S).txt"
 
 # Configure serial port
-stty -F "$PORT" 115200 raw -echo || exit 1
+stty -F "$PORT" raw -echo || exit 1
 
 # Open serial port for reading and writing
 exec 3<>"$PORT" || exit 1
