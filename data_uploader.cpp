@@ -1,6 +1,7 @@
 #include <ixwebsocket/IXNetSystem.h>
 #include <ixwebsocket/IXWebSocket.h>
 
+#include <boost/circular_buffer.hpp>
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <net/if.h>
@@ -15,6 +16,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+<<<<<<< HEAD
+=======
+#include <fcntl.h>
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -24,10 +29,36 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+<<<<<<< HEAD
+=======
+#include <vector>
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 
-// ========== Structs and Constants ==========
+#include "globals.h"
+#include "ublox_gnss.h"
+
+// MARK: Namespace
+using std::uint16_t;
+using std::uint32_t;
+using std::uint64_t;
+using std::uint8_t;
+
+using std::int16_t;
+using std::int32_t;
+using std::int64_t;
+using std::int8_t;
+
+using std::atomic;
+using std::fprintf;
+using std::printf;
+using std::size_t;
+using std::thread;
+/* NAMESPACE END */
+
+// MARK: Structs/Consts
 const std::string url_prefix = "ws://";
 const std::string url_suffix = ":8000/api/ws/send";
+<<<<<<< HEAD
 const uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 const uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
 const uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
@@ -48,18 +79,41 @@ struct pi_to_server {
     uint8_t length;
     uint8_t bytes[8];
 } __attribute__((packed));
+=======
+const std::string bs_url_suffix = ":8081/rtk";
+constexpr const char *GNSS_DEV = "/dev/ttyACM0";
+constexpr uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
+constexpr uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
+constexpr uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
+constexpr uint16_t NUM_PACKET_RETRIES = 20; // Retries sending a packet this many times, then closes
+constexpr size_t GNSS_BUF_SIZE = 2048;      // Buffer size for reading GNSS data
+constexpr uint32_t GNSS_CAN_ID = 9;
+constexpr uint32_t GNSS_CAN_ID = 9;
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 
 struct queued_packet {
     pi_to_server pkt;
     uint64_t last_send_attempt;
     uint16_t retries;
 };
+/* STRUCTS/CONSTS END */
 
+<<<<<<< HEAD
 // ========== Non-Constant Global Variables ==========
+=======
+/* Non-Const Global Variables */
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 volatile std::sig_atomic_t stop_requested = 0;
+bool gnss_on = true;
+/* NON-CONST GLOBALS END */
 
+<<<<<<< HEAD
 // ========== Helper Functions ==========
 
+=======
+/* MARK: Helper Funcs
+ */
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 // Monotonic timestamp in ms (relative to start)
 static inline uint64_t getTimeNow64() {
     using namespace std::chrono;
@@ -84,8 +138,13 @@ std::string getEnvVar(const char *name) {
 
     return std::string(value);
 }
+/* HELPER FUNCS END */
 
+<<<<<<< HEAD
 // ========== Main code ==========
+=======
+// MARK: Main Code ***
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 static_assert(
     sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"
 ); // Constantly checks that packet is the right size
@@ -119,6 +178,7 @@ static int openCANSocket(const char *ifname) {
     return s;
 }
 
+<<<<<<< HEAD
 // Sets up websocket with URL and sets up message callback function
 void setupWebSocket(
     ix::WebSocket &webSocket, const std::string &url, std::atomic<bool> &ws_open,
@@ -126,6 +186,15 @@ void setupWebSocket(
     std::atomic<uint64_t> &next_reconnect_attempt
 ) {
 
+=======
+// MARK: Setup WS
+// Sets up websocket with URL and sets up message callback function
+void setupWebSocket(
+    ix::WebSocket &webSocket, const std::string &url, atomic<bool> &ws_open,
+    atomic<bool> &was_connected, atomic<uint64_t> &reconnect_deadline,
+    atomic<uint64_t> &next_reconnect_attempt
+) {
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
     // Closes WS and sets reconnect_deadline
     auto close_ws = [&]() {
         ws_open = false;
@@ -139,7 +208,15 @@ void setupWebSocket(
 
     webSocket.setUrl(url);
     webSocket.disableAutomaticReconnection();
+<<<<<<< HEAD
     webSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
+=======
+    webSocket.setOnMessageCallback([&, close_ws](const ix::WebSocketMessagePtr &msg) {
+        // explanation of [&, close_ws]:
+        // &:           means to capture local variables used by the callback
+        // close_ws:    capture close_ws as a copy (lambdas die when surrouding func call rets)
+        //              --Anything created in close_ws dies when func call rets
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
         using Type = ix::WebSocketMessageType;
 
         if (msg->type == Type::Open) {
@@ -147,25 +224,132 @@ void setupWebSocket(
             was_connected = true;
             reconnect_deadline = 0;
             next_reconnect_attempt = 0;
-            std::cout << "Connected to WS" << "\n";
+            printf("Connected to WS\n");
         } else if (msg->type == Type::Message) {
-            std::printf("Received text msg: %s\n", msg->str);
+            printf("Received text msg: %s\n", (msg->str).c_str());
         } else if (msg->type == Type::Close) {
             close_ws();
-            std::printf("Close signal received\n");
+            printf("Close signal received\n");
         } else if (msg->type == Type::Error) {
             close_ws();
+<<<<<<< HEAD
             std::fprintf(stderr, "WS Error: %s\n", msg->errorInfo.reason);
         } else if (msg->type == Type::Ping) {
             std::printf("Received ping %s\n", msg->str);
+=======
+            fprintf(stderr, "WS Error: %s\n", msg->errorInfo.reason.c_str());
+        } else if (msg->type == Type::Ping) {
+            printf("Received ping %s\n", (msg->str).c_str());
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
         } else if (msg->type == Type::Pong) {
-            std::printf("Received pong %s\n", msg->str);
+            printf("Received pong %s\n", (msg->str).c_str());
         }
     });
 }
 
+<<<<<<< HEAD
 void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomic<bool> &running) {
     while (running) {
+=======
+// MARK: GNSS Reader
+// Reads data from GNSS module, gives it to handlers
+// Also opens WS for reading RTK corrections and writes those corrections to GNSS module
+void gnssReader(
+    int gnss_fd, const std::string &base_station_url, std::mutex &m, std::queue<queued_packet> &q,
+    atomic<bool> &running
+) {
+    if (!config_gnss(gnss_fd)) {
+        std::perror("Failed to configure GNSS socket");
+        return;
+    }
+
+    boost::circular_buffer<uint8_t> gnss_data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
+    std::vector<uint8_t> read_buf(GNSS_BUF_SIZE);                 // Buffer for reading GNSS data
+    std::vector<uint8_t> ubx_frame;                               // Vector for extracted UBX frame
+    ix::WebSocket bsWebSocket;                                    // Websocket to base station
+
+    // Configure Base Station Websocket
+    bsWebSocket.setUrl(base_station_url);
+    bsWebSocket.enableAutomaticReconnection();
+    bsWebSocket.setMinWaitBetweenReconnectionRetries(1000);
+    bsWebSocket.setMaxWaitBetweenReconnectionRetries(10000);
+    bsWebSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
+        using Type = ix::WebSocketMessageType;
+
+        if (msg->type == Type::Open) {
+            printf("Connected to Base Station WS\n");
+        } else if (msg->type == Type::Message) {
+            if (!running || !msg->binary || msg->str.empty())
+                return;
+            std::vector<uint8_t> rtk_corrections(msg->str.begin(), msg->str.end());
+            writeRTKCorrections(gnss_fd, rtk_corrections);
+        } else if (msg->type == Type::Close) {
+            printf("Base Station WS closed\n");
+        } else if (msg->type == Type::Error) {
+            fprintf(stderr, "Base Station WS Error: %s\n", msg->errorInfo.reason.c_str());
+        }
+    });
+    bsWebSocket.start();
+
+    // MARK: GNSS Loop
+    // Loop to read from GNSS Module and do stuff with data
+    while (running) {
+        // Handle all UBX frames currently in buffer
+        while (running && tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
+            uint16_t msg_type = handleUbxMessage(ubx_frame);
+            pi_to_server pkt{};
+            if (msg_type == UBX_NAV_PVT && handleNavPvt(ubx_frame, pkt)) {
+                pkt.timestamp = getTimeNow32();
+                pkt.id = GNSS_CAN_ID;
+                queued_packet qd;
+                qd.pkt = pkt;
+                qd.last_send_attempt = 0;
+                qd.retries = 0;
+                {
+                    std::lock_guard<std::mutex> lk(m);
+                    q.push(qd);
+                }
+            } else if (msg_type == UBX_RXM_RTCM) {
+                handleRxmRtcm(ubx_frame);
+            }
+        }
+
+        if (!running) {
+            break;
+        }
+
+        size_t freespace = GNSS_BUF_SIZE - gnss_data_buf.size();
+        if (freespace == 0) {
+            gnss_data_buf.erase_begin(1);
+            continue; // Buffer is full, wait for processing
+        }
+
+        // Read bytes into read_buf
+        ssize_t bytes_read = read(gnss_fd, read_buf.data(), freespace);
+        if (bytes_read > 0) { // Moves data from into ring buffer for handling
+            gnss_data_buf.insert(
+                gnss_data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read
+            );
+        } else if (bytes_read == 0) { // Read no bytes
+            continue;
+        } else if (bytes_read < 0) { // Error reading from GNSS device
+            if (errno == EINTR) {
+                continue; // Interrupted by signal, retry reading
+            } else {
+                if (!running)
+                    break;
+                perror("read(gnss)");
+                continue;
+            }
+        }
+    }
+    bsWebSocket.stop();
+}
+
+// MARK: CAN Reader
+void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<bool> &running) {
+    while (running) {
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
         struct can_frame frame{};
         int n = read(can_fd, &frame, sizeof(frame));
         if (n < 0) {
@@ -212,25 +396,44 @@ void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, std::atomi
     }
 }
 
+<<<<<<< HEAD
+=======
+// MARK: Main Func ***
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 int main() {
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
     std::string server_ip;
+<<<<<<< HEAD
     try {
         server_ip = getEnvVar("AVA_SERVER_IP");
+=======
+    std::string base_station_ip;
+    try {
+        server_ip = getEnvVar("AVA_SERVER_IP");
+        base_station_ip = getEnvVar("BASE_STATION_IP");
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
     } catch (const std::exception &e) {
         std::cerr << e.what() << "\n";
         return 1;
     }
     const std::string url = url_prefix + server_ip + url_suffix;
+    const std::string base_station_url = url_prefix + base_station_ip + bs_url_suffix;
 
     // Websocket setup
     ix::WebSocket webSocket;
+<<<<<<< HEAD
     std::atomic<bool> ws_open{false};
     std::atomic<bool> was_connected{false};
     std::atomic<uint64_t> reconnect_deadline{0};
     std::atomic<uint64_t> next_reconnect_attempt{0};
+=======
+    atomic<bool> ws_open{false};
+    atomic<bool> was_connected{false};
+    atomic<uint64_t> reconnect_deadline{0};
+    atomic<uint64_t> next_reconnect_attempt{0};
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
     setupWebSocket(
         webSocket, url, ws_open, was_connected, reconnect_deadline, next_reconnect_attempt
     );
@@ -238,7 +441,11 @@ int main() {
     // CAN queue
     std::mutex m;
     std::queue<queued_packet> q;
+<<<<<<< HEAD
     std::atomic<bool> running{true}; // Atomic so that all threads can read it safely
+=======
+    atomic<bool> running{true}; // Atomic so that all threads can read it safely
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
 
     webSocket.start();
 
@@ -252,6 +459,7 @@ int main() {
         return 1;
     }
 
+    // MARK: FDs & Threads
     // open file desc for CAN1
     int can1_fd = openCANSocket("can1");
     if (can1_fd < 0) {
@@ -259,14 +467,41 @@ int main() {
         return 1;
     }
 
+    int gnss_fd = -1;
+    if (gnss_on) {
+        gnss_fd = open(GNSS_DEV, O_RDWR | O_NOCTTY);
+        if (gnss_fd < 0) {
+            std::perror("Failed to open GNSS socket");
+            return 1;
+        }
+        if (!setupGnssFd(gnss_fd)) {
+            std::perror("Failed to setup GNSS socket");
+            return 1;
+        }
+    }
+
     // CAN0 reader thread
+<<<<<<< HEAD
     std::thread can0_thread([&]() { readCAN(can0_fd, m, q, running); });
 
     // CAN1 reader thread
     std::thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
+=======
+    thread can0_thread([&]() { readCAN(can0_fd, m, q, running); });
 
-    // Sender loop
-    std::cout << "Starting sender loop...\nPress Ctrl+C to quit\n";
+    // CAN1 reader thread
+    thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
+
+    // GNSS reader thread
+    thread gnss_thread;
+    if (gnss_on) {
+        gnss_thread = thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
+    }
+    /* FDS & THREADS END */
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
+
+    // MARK: Sender Loop
+    printf("Starting sender loop...\nPress Ctrl+C to quit\n");
     while (!stop_requested) {
 
         // -- Reconnect logic --
@@ -274,7 +509,11 @@ int main() {
 
             // check if reconnect deadline has passed, close program if so
             if (reconnect_deadline != 0 && getTimeNow64() >= reconnect_deadline) {
+<<<<<<< HEAD
                 std::cout << "Websocket closed.\n";
+=======
+                fprintf(stderr, "Websocket closed.\n");
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
                 break;
             }
 
@@ -323,26 +562,43 @@ int main() {
         } else { // If failed to send, retry; if too many retries, reconnect
             std::lock_guard<std::mutex> lock(m);
             if (q.front().retries++ >= NUM_PACKET_RETRIES) {
+<<<<<<< HEAD
                 std::cerr << "Failed to send packet after " << NUM_PACKET_RETRIES
                           << " retries. Reconnecting.\n";
+=======
+                fprintf(
+                    stderr, "Failed to send packet after %d retries. Reconnecting.\n",
+                    NUM_PACKET_RETRIES
+                );
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
                 q.front().retries = 0;
                 q.front().last_send_attempt = 0;
                 ws_open = false;
                 webSocket.stop();
                 continue;
             }
-            std::cerr << "Failed to send packet\n";
+            fprintf(stderr, "Failed to send packet\n");
         }
     }
 
+<<<<<<< HEAD
     // Cleanup
+=======
+    // MARK: Cleanup
+>>>>>>> d34a913affabf15e0b2cd4c668b49778b915cb89
     running = false;
     shutdown(can0_fd, SHUT_RD);
     shutdown(can1_fd, SHUT_RD);
-    close(can0_fd);
-    close(can1_fd);
     can0_thread.join();
     can1_thread.join();
+    if (gnss_thread.joinable()) {
+        gnss_thread.join();
+    }
+    if (gnss_fd >= 0) {
+        close(gnss_fd);
+    }
+    close(can0_fd);
+    close(can1_fd);
     webSocket.stop();
     ix::uninitNetSystem();
 

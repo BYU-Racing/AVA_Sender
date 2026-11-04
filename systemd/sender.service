@@ -1,17 +1,31 @@
 [Unit]
 Description=AVA CAN telemetry sender
-Wants=network-online.target
-After=network-online.target
+# network-online.target ensures the modem has an actual IP address
+Wants=network-online.target can_starter.service systemd-time-wait-sync.service
+After=network-online.target can_starter.service systemd-time-wait-sync.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/opt/AVA_Sender
-EnvironmentEnvironmentFile=/opt/AVA_Sender/.env
-ExecStart=/opt/AVA_Sender/run.sh
+User=root
+WorkingDirectory=/home/ava3/AVA_Sender
+ExecStart=/home/ava3/AVA_Sender/run.sh
+
+# Give the modem up to 30 seconds to get an IP on the first boot.
+# Once it's online, this command returns instantly.
+ExecStartPre=/usr/bin/nm-online -q --timeout=30
+
+# Keep this if your run.sh needs a moment for CAN buffers to stabilize
+ExecStartPre=/bin/sleep 1
+
+
+# If your C++ code takes a while to handshake, 10s might be too tight. 
+# If it fails during the "WS Connect" phase, increase this slightly.
+TimeoutStartSec=45
 
 Restart=always
-RestartSec=2
+# 5s gives the OS/Modem a tiny bit more breathing room to reset the stack
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
