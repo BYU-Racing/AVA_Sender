@@ -28,6 +28,7 @@
 #include <thread>
 #include <vector>
 
+#include "can_parser.hpp"
 #include "globals.h"
 #include "ublox_gnss.h"
 
@@ -59,7 +60,6 @@ constexpr uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reco
 constexpr uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
 constexpr uint16_t NUM_PACKET_RETRIES = 20; // Retries sending a packet this many times, then closes
 constexpr size_t GNSS_BUF_SIZE = 2048;      // Buffer size for reading GNSS data
-constexpr uint32_t GNSS_CAN_ID = 9;
 constexpr uint32_t GNSS_CAN_ID = 9;
 
 struct queued_packet {
@@ -281,7 +281,10 @@ void gnssReader(
 }
 
 // MARK: CAN Reader
-void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<bool> &running) {
+void readCAN(
+    int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<bool> &running,
+    CanParser &can_parse
+) {
     while (running) {
         struct can_frame frame{};
         int n = read(can_fd, &frame, sizeof(frame));
@@ -293,9 +296,6 @@ void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<boo
         }
         if (n != (int)sizeof(frame))
             continue;
-
-        pi_to_server pkt{};
-        pkt.timestamp = getTimeNow32();
 
         // Ignore error frames
         if (frame.can_id & CAN_ERR_FLAG) {
@@ -310,21 +310,31 @@ void readCAN(int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<boo
             raw_id = (frame.can_id & CAN_SFF_MASK); // 11-bit standard
         }
 
-        pkt.id = raw_id;
+        CAN_message_t canMsg = {};
+        canMsg.id = raw_id;
+        canMsg.len = frame.can_dlc > 8 ? 8 : frame.can_dlc;
+        std::memcpy(canMsg.buf, frame.data, canMsg.len);
 
-        pkt.length = frame.can_dlc;
-        if (pkt.length > 8)
-            pkt.length = 8;
-        std::memcpy(pkt.bytes, frame.data, pkt.length);
+        auto signals = parse_frame(canMsg);
+        if (signals == std::nullopt) {
+            continue;
+        }
 
-        queued_packet queued{};
-        queued.pkt = pkt;
-        queued.last_send_attempt = 0;
-        queued.retries = 0;
+        for (const auto &[name, val] : signals) {
+            pi_to_server pkt{};
+            pkt.timestamp = getTimeNow32();
+            pkt.name = name;
+            pkt.data = val;
 
-        {
-            std::lock_guard<std::mutex> lk(m);
-            q.push(queued);
+            queued_packet queued{};
+            queued.pkt = pkt;
+            queued.last_send_attempt = 0;
+            queued.retries = 0;
+
+            {
+                std::lock_guard<std::mutex> lk(m);
+                q.push(queued);
+            }
         }
     }
 }
@@ -361,6 +371,8 @@ int main() {
     std::queue<queued_packet> q;
     atomic<bool> running{true}; // Atomic so that all threads can read it safely
 
+    CanParser can_parse = {};
+
     webSocket.start();
 
     // first reconnect attempt is RETRY_INTERVAL_MS after start
@@ -395,10 +407,10 @@ int main() {
     }
 
     // CAN0 reader thread
-    thread can0_thread([&]() { readCAN(can0_fd, m, q, running); });
+    thread can0_thread([&]() { readCAN(can0_fd, m, q, running, can_parse); });
 
     // CAN1 reader thread
-    thread can1_thread([&]() { readCAN(can1_fd, m, q, running); });
+    thread can1_thread([&]() { readCAN(can1_fd, m, q, running, can_parse); });
 
     // GNSS reader thread
     thread gnss_thread;
