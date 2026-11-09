@@ -8,7 +8,7 @@
 #include <iostream>
 #include <stdexcept>
 
-using msgMap = std::unordered_map<uint64_t, const dbcppp::IMessage *>;
+using msgMap = std::unordered_map<uint32_t, const dbcppp::IMessage *>;
 
 CanParser::CanParser() {
     dbc = load_dbc();
@@ -33,9 +33,9 @@ std::unique_ptr<dbcppp::INetwork> CanParser::load_dbc() {
 }
 
 messageMap CanParser::loadMessages() {
-    std::unordered_map<uint64_t, const dbcppp::IMessage *> messages;
+    std::unordered_map<uint32_t, const dbcppp::IMessage *> messages;
     for (const dbcppp::IMessage &msg : dbc->Messages()) {
-        messages.insert(std::make_pair(msg.Id(), &msg));
+        messages.insert(std::make_pair(static_cast<uint32_t>(msg.Id()), &msg));
     }
     return messages;
 }

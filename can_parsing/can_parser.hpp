@@ -9,7 +9,7 @@
 #include <optional>
 #include <unordered_map>
 
-using messageMap = std::unordered_map<uint64_t, const dbcppp::IMessage *>;
+using messageMap = std::unordered_map<uint32_t, const dbcppp::IMessage *>;
 
 class CanParser {
   public:

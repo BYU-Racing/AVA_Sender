@@ -29,7 +29,7 @@
 #include <vector>
 
 #include "can_parser.hpp"
-#include "globals.h"
+#include "globals.hpp"
 #include "ublox_gnss.h"
 
 // MARK: Namespace
@@ -48,6 +48,9 @@ using std::fprintf;
 using std::printf;
 using std::size_t;
 using std::thread;
+
+using SignalKey = std::pair<uint32_t, std::string>;
+using SignalIDMap = std::map<SignalKey, uint16_t>;
 /* NAMESPACE END */
 
 // MARK: Structs/Consts
@@ -283,7 +286,7 @@ void gnssReader(
 // MARK: CAN Reader
 void readCAN(
     int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<bool> &running,
-    CanParser &can_parse
+    CanParser &can_parse, SignalIdMap &id_map
 ) {
     while (running) {
         struct can_frame frame{};
@@ -323,7 +326,7 @@ void readCAN(
         for (const auto &[name, val] : signals) {
             pi_to_server pkt{};
             pkt.timestamp = getTimeNow32();
-            pkt.name = name;
+            pkt.sig_id = id_map.at(SignalKey{canMsg.id, name});
             pkt.data = val;
 
             queued_packet queued{};
@@ -371,7 +374,9 @@ int main() {
     std::queue<queued_packet> q;
     atomic<bool> running{true}; // Atomic so that all threads can read it safely
 
+    // Create CAN parsing objects
     CanParser can_parse = {};
+    SignalIDMap id_map = makeSignalMap(can_parse);
 
     webSocket.start();
 
@@ -407,10 +412,10 @@ int main() {
     }
 
     // CAN0 reader thread
-    thread can0_thread([&]() { readCAN(can0_fd, m, q, running, can_parse); });
+    thread can0_thread([&]() { readCAN(can0_fd, m, q, running, can_parse, id_map); });
 
     // CAN1 reader thread
-    thread can1_thread([&]() { readCAN(can1_fd, m, q, running, can_parse); });
+    thread can1_thread([&]() { readCAN(can1_fd, m, q, running, can_parse, id_map); });
 
     // GNSS reader thread
     thread gnss_thread;

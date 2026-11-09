@@ -3,7 +3,7 @@
 
 // TODO: Add in UBX-NAV-HPPOSLLH functionality for high-def GPS
 
-#include "globals.h"
+#include "globals.hpp"
 #include <boost/circular_buffer.hpp>
 #include <cstdint>
 #include <iostream>
