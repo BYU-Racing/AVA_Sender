@@ -215,83 +215,90 @@ void gnssReader(
     int gnss_fd, const std::string &base_station_url, std::mutex &m, std::condition_variable &cv,
     std::queue<queued_packet> &q, atomic<bool> &running
 ) {
-    GnssInterface gnss(gnss_fd);
 
-    boost::circular_buffer<uint8_t> gnss_data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
-    std::vector<uint8_t> read_buf(GNSS_BUF_SIZE);                 // Buffer for reading GNSS data
-    std::vector<uint8_t> ubx_frame;                               // Vector for extracted UBX frame
-    ix::WebSocket bsWebSocket;                                    // Websocket to base station
+    try {
+        GnssInterface gnss(gnss_fd);
 
-    // Configure Base Station Websocket
-    bsWebSocket.setUrl(base_station_url);
-    bsWebSocket.enableAutomaticReconnection();
-    bsWebSocket.setMinWaitBetweenReconnectionRetries(1000);
-    bsWebSocket.setMaxWaitBetweenReconnectionRetries(10000);
-    bsWebSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
-        using Type = ix::WebSocketMessageType;
+        boost::circular_buffer<uint8_t> gnss_data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
+        std::vector<uint8_t> read_buf(GNSS_BUF_SIZE); // Buffer for reading GNSS data
+        std::vector<uint8_t> ubx_frame;               // Vector for extracted UBX frame
+        ix::WebSocket bsWebSocket;                    // Websocket to base station
 
-        if (msg->type == Type::Open) {
-            printf("Connected to Base Station WS\n");
-        } else if (msg->type == Type::Message) {
-            if (!running || !msg->binary || msg->str.empty())
-                return;
-            std::vector<uint8_t> rtk_corrections(msg->str.begin(), msg->str.end());
-            writeRTKCorrections(gnss_fd, rtk_corrections);
-        } else if (msg->type == Type::Close) {
-            printf("Base Station WS closed\n");
-        } else if (msg->type == Type::Error) {
-            fprintf(stderr, "Base Station WS Error: %s\n", msg->errorInfo.reason.c_str());
-        }
-    });
-    bsWebSocket.start();
+        // Configure Base Station Websocket
+        bsWebSocket.setUrl(base_station_url);
+        bsWebSocket.enableAutomaticReconnection();
+        bsWebSocket.setMinWaitBetweenReconnectionRetries(1000);
+        bsWebSocket.setMaxWaitBetweenReconnectionRetries(10000);
+        bsWebSocket.setOnMessageCallback([&](const ix::WebSocketMessagePtr &msg) {
+            using Type = ix::WebSocketMessageType;
 
-    // MARK: GNSS Loop
-    // Loop to read from GNSS Module and do stuff with data
-    while (running) {
-        // Handle all UBX frames currently in buffer
-        while (running && tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
-            uint16_t msg_type = handleUbxMessage(ubx_frame);
-            pi_to_server pkt{};
-            if (msg_type == UBX_NAV_PVT && handleNavPvt(ubx_frame, pkt)) {
-                pkt.timestamp = getTimeNow32();
-                pkt.id = GNSS_CAN_ID;
-                queued_packet queued = makeQueuedPacket(pkt);
-                queuePacket(m, cv, q, queued);
-            } else if (msg_type == UBX_RXM_RTCM) {
-                handleRxmRtcm(ubx_frame);
+            if (msg->type == Type::Open) {
+                printf("Connected to Base Station WS\n");
+            } else if (msg->type == Type::Message) {
+                if (!running || !msg->binary || msg->str.empty())
+                    return;
+                std::vector<uint8_t> rtk_corrections(msg->str.begin(), msg->str.end());
+                writeRTKCorrections(gnss_fd, rtk_corrections);
+            } else if (msg->type == Type::Close) {
+                printf("Base Station WS closed\n");
+            } else if (msg->type == Type::Error) {
+                fprintf(stderr, "Base Station WS Error: %s\n", msg->errorInfo.reason.c_str());
             }
-        }
+        });
+        bsWebSocket.start();
 
-        if (!running) {
-            break;
-        }
+        // MARK: GNSS Loop
+        // Loop to read from GNSS Module and do stuff with data
+        while (running) {
+            // Handle all UBX frames currently in buffer
+            while (running && tryExtractUbxFrame(gnss_data_buf, ubx_frame)) {
+                uint16_t msg_type = handleUbxMessage(ubx_frame);
+                pi_to_server pkt{};
+                if (msg_type == UBX_NAV_PVT && handleNavPvt(ubx_frame, pkt)) {
+                    pkt.timestamp = getTimeNow32();
+                    pkt.id = GNSS_CAN_ID;
+                    queued_packet queued = makeQueuedPacket(pkt);
+                    queuePacket(m, cv, q, queued);
+                } else if (msg_type == UBX_RXM_RTCM) {
+                    handleRxmRtcm(ubx_frame);
+                }
+            }
 
-        size_t freespace = GNSS_BUF_SIZE - gnss_data_buf.size();
-        if (freespace == 0) {
-            gnss_data_buf.erase_begin(1);
-            continue; // Buffer is full, wait for processing
-        }
+            if (!running) {
+                break;
+            }
 
-        // Read bytes into read_buf
-        ssize_t bytes_read = read(gnss_fd, read_buf.data(), freespace);
-        if (bytes_read > 0) { // Moves data from into ring buffer for handling
-            gnss_data_buf.insert(
-                gnss_data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read
-            );
-        } else if (bytes_read == 0) { // Read no bytes
-            continue;
-        } else if (bytes_read < 0) { // Error reading from GNSS device
-            if (errno == EINTR) {
-                continue; // Interrupted by signal, retry reading
-            } else {
-                if (!running)
-                    break;
-                perror("read(gnss)");
+            size_t freespace = GNSS_BUF_SIZE - gnss_data_buf.size();
+            if (freespace == 0) {
+                gnss_data_buf.erase_begin(1);
+                continue; // Buffer is full, wait for processing
+            }
+
+            // Read bytes into read_buf
+            ssize_t bytes_read = read(gnss_fd, read_buf.data(), freespace);
+            if (bytes_read > 0) { // Moves data from into ring buffer for handling
+                gnss_data_buf.insert(
+                    gnss_data_buf.end(), read_buf.begin(), read_buf.begin() + bytes_read
+                );
+            } else if (bytes_read == 0) { // Read no bytes
                 continue;
+            } else if (bytes_read < 0) { // Error reading from GNSS device
+                if (errno == EINTR) {
+                    continue; // Interrupted by signal, retry reading
+                } else {
+                    if (!running)
+                        break;
+                    perror("read(gnss)");
+                    continue;
+                }
             }
         }
+        bsWebSocket.stop();
+
+    } catch (const std::exception &e) {
+        std::fprintf(stderr, "GNSS failure: %s\n", e.what());
+        return;
     }
-    bsWebSocket.stop();
 }
 
 // MARK: CAN Reader

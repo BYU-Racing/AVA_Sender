@@ -101,11 +101,11 @@ static std::int32_t readInt32LE(const std::uint8_t *data) {
 
 // MARK: GNSS Class
 
-GnssInterface(int gnss_fd) : gnss_fd(gnss_fd) {
-    if (!setupGnssFd(gnss_fd)) {
+GnssInterface::GnssInterface(int gnss_fd) : gnss_fd(gnss_fd) {
+    if (!setupGnssFd()) {
         throw std::runtime_error("Failed to setup GNSS socket");
     }
-    if (!config_gnss(gnss_fd)) {
+    if (!config_gnss()) {
         throw std::runtime_error("Failed to configure GNSS socket");
     }
 }
