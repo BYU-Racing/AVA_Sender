@@ -1,6 +1,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 
 #include <termios.h>
@@ -98,9 +99,18 @@ static std::int32_t readInt32LE(const std::uint8_t *data) {
     return static_cast<std::int32_t>(readUInt32LE(data));
 }
 
-// MARK: User Funcs
+// MARK: GNSS Class
 
-bool setupGnssFd(int gnss_fd) {
+GnssInterface(int gnss_fd) : gnss_fd(gnss_fd) {
+    if (!setupGnssFd(gnss_fd)) {
+        throw std::runtime_error("Failed to setup GNSS socket");
+    }
+    if (!config_gnss(gnss_fd)) {
+        throw std::runtime_error("Failed to configure GNSS socket");
+    }
+}
+
+bool GnssInterface::setupGnssFd() {
     struct termios settings{};
     int res = tcgetattr(gnss_fd, &settings);
     if (res < 0) {
@@ -126,7 +136,7 @@ bool setupGnssFd(int gnss_fd) {
     return true;
 }
 
-bool config_gnss(int gnss_fd) {
+bool GnssInterface::config_gnss() {
     std::vector<std::uint8_t> payload;
     payload.reserve(CFG_PAYLOAD_SIZE);
 
@@ -189,11 +199,7 @@ bool config_gnss(int gnss_fd) {
     return true;
 }
 
-// static readSerialData();
-
-// processReceiveBuffer();
-
-void writeRTKCorrections(int gnss_fd, std::vector<std::uint8_t> rtk_corrections) {
+void GnssInterface::writeRTKCorrections(std::vector<std::uint8_t> rtk_corrections) {
     int bytes_written = 0;
     while (bytes_written < rtk_corrections.size()) {
         int res = write(
@@ -212,6 +218,12 @@ void writeRTKCorrections(int gnss_fd, std::vector<std::uint8_t> rtk_corrections)
         bytes_written += res;
     }
 }
+
+// MARK: User Funcs
+
+// static readSerialData();
+
+// processReceiveBuffer();
 
 bool tryExtractUbxFrame(
     boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame

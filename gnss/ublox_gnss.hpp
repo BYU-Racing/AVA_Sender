@@ -60,13 +60,23 @@ static void appendU32LE(std::vector<std::uint8_t> &vec, std::uint32_t value);
 // Validates that checksum matches data in frame. Returns true if valid.
 static bool validateUbxChecksum(std::vector<std::uint8_t> frame, std::uint16_t length);
 
+// ======== GNSS Class ========
+class GnssInterface {
+  public:
+    GnssInterface(int gnss_fd); // Constructor, sets up and configs GNSS device
+
+    // Writes RTK corrections from Base Station to the GNSS device. Returns true on success.
+    void writeRTKCorrections(std::vector<std::uint8_t> rtk_corrections);
+
+  private:
+    int gnss_fd;
+
+    bool setupGnssFd(); // Prepares the GNSS file desc for rd/wr. Return true on success.
+    bool config_gnss(); // Writes configs to GNSS device. Return true on success.
+}
+
 // ======== User funcs ========
 
-bool setupGnssFd(int gnss_fd); // Prepares the GNSS file desc for rd/wr. Return true on success.
-bool config_gnss(int gnss_fd); // Writes configs to GNSS device. Return true on success.
-
-// Writes RTK corrections from Base Station to the GNSS device. Returns true on success.
-void writeRTKCorrections(int gnss_fd, std::vector<std::uint8_t> rtk_corrections);
 // Tries to extract a UBX frame from data_buf into ubx_frame. Returns true if a frame was extracted.
 bool tryExtractUbxFrame(
     boost::circular_buffer<std::uint8_t> &data_buf, std::vector<std::uint8_t> &ubx_frame

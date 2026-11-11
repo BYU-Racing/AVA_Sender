@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -60,7 +61,7 @@ const std::string bs_url_suffix = ":8081/rtk";
 constexpr const char *GNSS_DEV = "/dev/ttyACM0";
 constexpr uint64_t RECONNECT_DELAY_MS = 10000; // 10 seconds, max time trying to reconnect
 constexpr uint64_t RETRY_INTERVAL_MS = 1000;   // 1 second interval between reconnect attempts
-constexpr uint64_t RESEND_INTERVAL_MS = 50;    // 50 ms interval between resending failed messages
+constexpr uint64_t RESEND_INTERVAL_MS = 20;    // 50 ms interval between resending failed messages
 constexpr uint16_t NUM_PACKET_RETRIES = 20; // Retries sending a packet this many times, then closes
 constexpr size_t GNSS_BUF_SIZE = 2048;      // Buffer size for reading GNSS data
 constexpr uint32_t GNSS_CAN_ID = 9;
@@ -77,8 +78,8 @@ volatile std::sig_atomic_t stop_requested = 0;
 bool gnss_on = true;
 /* NON-CONST GLOBALS END */
 
-/* MARK: Helper Funcs
- */
+/* MARK: Helper Funcs */
+
 // Monotonic timestamp in ms (relative to start)
 static inline uint64_t getTimeNow64() {
     using namespace std::chrono;
@@ -102,6 +103,25 @@ std::string getEnvVar(const char *name) {
     }
 
     return std::string(value);
+}
+
+// Creates a queued_packet struct from a pi_to_server struct
+static queued_packet makeQueuedPacket(pi_to_server &packet) {
+    queued_packet queued{};
+    queued.pkt = packet;
+    queued.last_send_attempt = 0;
+    queued.retries = 0;
+    return queued;
+}
+
+static void queuePacket(
+    std::mutex &m, std::condition_variable &cv, std::queue<queued_packet> &q, queued_packet &queued
+) {
+    {
+        std::lock_guard<std::mutex> lk(m);
+        q.push(queued);
+    }
+    cv.notify_one();
 }
 /* HELPER FUNCS END */
 
@@ -192,13 +212,10 @@ void setupWebSocket(
 // Reads data from GNSS module, gives it to handlers
 // Also opens WS for reading RTK corrections and writes those corrections to GNSS module
 void gnssReader(
-    int gnss_fd, const std::string &base_station_url, std::mutex &m, std::queue<queued_packet> &q,
-    atomic<bool> &running
+    int gnss_fd, const std::string &base_station_url, std::mutex &m, std::condition_variable &cv,
+    std::queue<queued_packet> &q, atomic<bool> &running
 ) {
-    if (!config_gnss(gnss_fd)) {
-        std::perror("Failed to configure GNSS socket");
-        return;
-    }
+    GnssInterface gnss(gnss_fd);
 
     boost::circular_buffer<uint8_t> gnss_data_buf(GNSS_BUF_SIZE); // Ring buffer to read in data
     std::vector<uint8_t> read_buf(GNSS_BUF_SIZE);                 // Buffer for reading GNSS data
@@ -238,14 +255,8 @@ void gnssReader(
             if (msg_type == UBX_NAV_PVT && handleNavPvt(ubx_frame, pkt)) {
                 pkt.timestamp = getTimeNow32();
                 pkt.id = GNSS_CAN_ID;
-                queued_packet qd;
-                qd.pkt = pkt;
-                qd.last_send_attempt = 0;
-                qd.retries = 0;
-                {
-                    std::lock_guard<std::mutex> lk(m);
-                    q.push(qd);
-                }
+                queued_packet queued = makeQueuedPacket(pkt);
+                queuePacket(m, cv, q, queued);
             } else if (msg_type == UBX_RXM_RTCM) {
                 handleRxmRtcm(ubx_frame);
             }
@@ -285,8 +296,8 @@ void gnssReader(
 
 // MARK: CAN Reader
 void readCAN(
-    int can_fd, std::mutex &m, std::queue<queued_packet> &q, atomic<bool> &running,
-    CanParser &can_parse, SignalIdMap &id_map
+    int can_fd, std::mutex &m, std::condition_variable &cv, std::queue<queued_packet> &q,
+    atomic<bool> &running, CanParser &can_parse, SignalIdMap &id_map
 ) {
     while (running) {
         struct can_frame frame{};
@@ -329,24 +340,19 @@ void readCAN(
             pkt.sig_id = id_map.at(SignalKey{canMsg.id, name});
             pkt.data = val;
 
-            queued_packet queued{};
-            queued.pkt = pkt;
-            queued.last_send_attempt = 0;
-            queued.retries = 0;
-
-            {
-                std::lock_guard<std::mutex> lk(m);
-                q.push(queued);
-            }
+            queued_packet queued = makeQueuedPacket(pkt);
+            queuePacket(m, cv, q, queued);
         }
     }
 }
 
 // MARK: Main Func ***
 int main() {
+    // Signal Handlers
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
+    // Setting WS URLs
     std::string server_ip;
     std::string base_station_ip;
     try {
@@ -371,6 +377,7 @@ int main() {
 
     // CAN queue
     std::mutex m;
+    std::condition_variable cv;
     std::queue<queued_packet> q;
     atomic<bool> running{true}; // Atomic so that all threads can read it safely
 
@@ -405,22 +412,18 @@ int main() {
             std::perror("Failed to open GNSS socket");
             return 1;
         }
-        if (!setupGnssFd(gnss_fd)) {
-            std::perror("Failed to setup GNSS socket");
-            return 1;
-        }
     }
 
     // CAN0 reader thread
-    thread can0_thread([&]() { readCAN(can0_fd, m, q, running, can_parse, id_map); });
+    thread can0_thread([&]() { readCAN(can0_fd, m, cv, q, running, can_parse, id_map); });
 
     // CAN1 reader thread
-    thread can1_thread([&]() { readCAN(can1_fd, m, q, running, can_parse, id_map); });
+    thread can1_thread([&]() { readCAN(can1_fd, m, cv, q, running, can_parse, id_map); });
 
     // GNSS reader thread
     thread gnss_thread;
     if (gnss_on) {
-        gnss_thread = thread([&]() { gnssReader(gnss_fd, base_station_url, m, q, running); });
+        gnss_thread = thread([&]() { gnssReader(gnss_fd, base_station_url, m, cv, q, running); });
     }
     /* FDS & THREADS END */
 
@@ -450,22 +453,33 @@ int main() {
 
         // Pop packet from queue for sending
         queued_packet q_pkt{};
-        bool unlocked = false;
         {
-            std::lock_guard<std::mutex> lock(m);
+            std::unique_lock<std::mutex> lock(m);
 
-            if (!q.empty()) { // if queue isn't empty, pop front pkt
-                q_pkt = q.front();
-                uint64_t now = getTimeNow64();
-                if ((q_pkt.last_send_attempt == 0) ||
-                    (now - q_pkt.last_send_attempt >= RESEND_INTERVAL_MS)) {
-                    q.front().last_send_attempt = now;
-                    unlocked = true;
+            for (;;) {
+                cv.wait(lock, [&] { return !ws_open || !q.empty(); });
+
+                if (!ws_open) {
+                    break;
                 }
+
+                auto &q_front = q.front();
+                const uint64_t now = getTimeNow64();
+                if (q_front.last_send_attempt != 0) {
+                    const auto elapsed = now - q_front.last_send_attempt;
+
+                    if (elapsed < RESEND_INTERVAL_MS) {
+                        cv.wait_for(lock, std::chrono::milliseconds(RESEND_INTERVAL_MS - elapsed));
+                        continue;
+                    }
+                }
+                q_front.last_send_attempt = now;
+                q_pkt = q_front;
+                break;
             }
         }
-        if (!unlocked) { // if queue not ready, wait 10ms and try again
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        if (!ws_open) {
             continue;
         }
 
