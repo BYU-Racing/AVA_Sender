@@ -127,7 +127,7 @@ static void queuePacket(
 
 // MARK: Main Code ***
 static_assert(
-    sizeof(pi_to_server) == 17, "pi_to_server must be 17 bytes"
+    sizeof(pi_to_server) == 10, "pi_to_server must be 10 bytes"
 ); // Constantly checks that packet is the right size
 
 // Opens a CAN socket on the specified interface and returns the socket file descriptor. Returns -1

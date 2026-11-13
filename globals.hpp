@@ -19,8 +19,8 @@
 struct pi_to_server {
     std::uint32_t timestamp;
     std::uint16_t sig_id;
-    double data;
-} __attribute__((packed)); // Length: 14 bytes
+    float data;
+} __attribute__((packed)); // Length: 10 bytes
 
 // Create signal ID mapping
 using SignalKey = std::pair<uint32_t, std::string>;
